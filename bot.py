@@ -2,9 +2,9 @@ import discord
 import sqlite3
 import random
 import gacha
-import battles
+import battles.battles as battles
 import datetime as dt
-import asyncio
+import aiosqlite
 import math
 from time import perf_counter
 from discord.ext import tasks
@@ -15,6 +15,13 @@ from difflib import get_close_matches
 from config import TOKEN, BOT_ID, ErrorColour
 from config import SERVER
 from config import DEBUG
+from character_database import CHARACTERS, BaseChar, CharInfo
+from battles.cards import Cards, BaseCard
+
+
+CHARACTER_LIST = tuple([character.name for character in CHARACTERS.values()])
+SERIES_LIST = tuple(set(character.series for character in CHARACTERS.values()))
+CARD_LIST = tuple([card.value.name for card in Cards])
 
 
 class SlotSelect(Select):
@@ -149,9 +156,19 @@ class Book(discord.ui.View):
             portrait = discord.File(f'Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
             embed.set_image(url=f'attachment://portrait.jpg')
 
-            await self.original_interaction.response.send_message(embed=embed, file=portrait, view=self)
+            if len(self.pages) == 1:
+                await self.original_interaction.response.send_message(embed=embed, file=portrait)
+            else:
+                await self.original_interaction.response.send_message(embed=embed, file=portrait, view=self)
+                
         else:
-            await self.original_interaction.response.send_message(embed=self.pages[0], view=self)
+            if len(self.pages) == 1:
+                await self.original_interaction.response.send_message(embed=self.pages[0])
+            else:
+                await self.original_interaction.response.send_message(embed=self.pages[0], view=self)
+
+
+info_group = app_commands.Group(name="info", description="Check information on various battle mechanics.")
 
 
 def run_discord_bot():
@@ -162,7 +179,7 @@ def run_discord_bot():
     tree = app_commands.CommandTree(client)
 
 
-############################################### COMMANDS ######################################################################
+    ############################################### COMMANDS ######################################################################
 
     
      ###### HELP
@@ -186,89 +203,6 @@ def run_discord_bot():
         await interaction.response.send_message(embed=embed)
     
 
-    ###### GACHA GUIDE
-    # @tree.command(
-    #         name = 'moveinfo',
-    #         description = 'View info about a move.',
-    #         guild = discord.Object(id=SERVER)
-    # )
-    # async def moveinfo(interaction: discord.Interaction, move: str):
-        
-    #     moves = list(map(lambda x: x['name'], gacha.BATTLE_MOVES))
-
-    #     if move.lower() not in moves:
-    #         embed = discord.Embed(title=f'Move Error', description=f'Could not find move "{move}".', color=ErrorColour)
-    #         await interaction.response.send_message(embed=embed, ephemeral=True)
-    #         return
-        
-    #     for battle_move in gacha.BATTLE_MOVES:
-    #         if move.lower() == battle_move['name']:
-    #             move = battle_move
-    #             break
-        
-    #     if move['name'] in ['academic', 'scheming', 'athleticism', 'fighting', 'empathy', 'influence']:
-    #         description = f'**Base Power**: 100%\n**Damage Type**: {move["damage_type"].capitalize()}'
-
-    #     elif move['name'] == 'unity':
-    #         description = f'Buffs the **Ability** of all allies by 35% for 5 turns. **Doesn\'t stack.**'
-
-    #     elif move['name'] == 'grit':
-        #     description = f'**Base Power**: 50% - 250% Scaling with user\'s % Missing Resolve\n**Damage Type**: Fighting'
-
-        # elif move['name'] == 'impulse':
-        #     description = f'**Base Power**: 60%\n**Damage Type**: Athleticism\n**Priority**: +3'
-
-        # elif move['name'] == 'kings command':
-        #     description = f'''The user summons a **Pawn** to their team, and is debuffed by -25% **Ability** for the rest of the battle. Fails if there is already an allied **Pawn** alive.
-        #     \n{gacha.special_emoji} **__Pawn__**\n
-        #     Personality: **Timid**\nMoves: **Scheming, Athleticism, Influence**\n
-        #     *All stats are inherited from its creator at 75% of their value.*\n\nTags: Persona'''
-
-        # elif move['name'] == 'inspire':
-        #     description = f'Heal the user\'s other allies by 33%.'
-
-        # elif move['name'] == 'study':
-        #     description = f'Boosts the user\'s **Mental** by 150% and **Initiative** by 100% for 1 turn.'
-
-        # elif move['name'] == 'kabedon':
-        #     description = f'Counters any opponent **Attack**.\n\n**Successful Counter**: Opponent is **stunned** for 1 turn.\n**Failed Counter**: User is **stunned** for 1 turn.'
-
-        # elif move['name'] == 'hate':
-        #     description = f'Debuffs the opponent\'s **Ability** by 25% for 4 turns.'
-
-        # elif move['name'] == 'dominate':
-        #     description = f'**Base Power**: 200%\n**Damage Type**: Influence\n**Priority**: -3\n\nInflicts **Splash Damage** to the opponent\'s other allies. The user\'s **Ability** is debuffed by 75% for 5 turns after use.'
-        
-        # elif move['name'] == 'charm':
-        #     description = f'Debuffs the opponent\'s **Social** by 33% for 4 turns. If it hasn\'t already been, the user collects the opponent\'s **secret** and heals by 25%.'
-
-        # elif move['name'] == 'shatter':
-        #     description = f'**Base Power**: 100%\n**Damage Type**: Influence\n\nGains the following bonuses depending on the number of **secrets** the user has collected:\n- **1+**: **Priority**: +3\n- **2+**: Heals the user for 35% of the damage dealt.\n- **3+**: +100% base power.'
-
-        # elif move['name'] == 'unmask':
-        #     description = f'The user transforms into their **Unmasked** form, and heals 20%.'
-
-        # elif move['name'] == 'mask':
-        #     description = f'The user transforms back into their base form.'
-
-        # elif move['name'] == 'from the shadows':
-        #     description = f'**Priority**: -5\n\n**Traps** the opponent for 3 turns. Then, the user tags out to a random ally (if possible), and if they do, the tagged-in ally becomes **pacified** and **invulnerable** for 1 turn.'
-
-        # elif move['name'] == 'arrogance':
-        #     description = f'Boosts the user\'s **Ability** by 40% for 2 turns.'
-
-        # elif move['name'] == 'the perfect existence':
-        #     description = f'**__Innate Ability__**\n\nCleanses all debuffs when the user tags in.\nWhen the user takes **fatal damage**, they instead apply the following effects:\n- Recover 50% **Resolve**\n- Gain +50% **Ability** for the rest of the battle.\n- Lose this move'
-        
-        # elif move['name'] == 'boss orders':
-        #     description = f'**__Innate Ability__**\n\nApplies the following buff to all allies when this character is defeated:\n- +50% **Mental**'
-
-        # elif move['name'] == 'provoke':
-        #     description = f'The user provokes the opponent, causing them to become **taunted** for 3 turns.\n\n(Taunted: Cannot use non-attacking moves or tag out.)'
-
-        # embed = discord.Embed(title=f'{move["name"].title()}', description=description, color=0xffb2ff)
-        # await interaction.response.send_message(embed=embed)
-
 
     
     ###### COLLECTION
@@ -288,10 +222,6 @@ def run_discord_bot():
         if mode is None:
             mode = app_commands.Choice(name='images', value=1)
 
-        if await gacha.getGacha(member) is None:
-            embed = discord.Embed(title='Collection Error', description=f'{member.mention} does not have a collection!', color=ErrorColour)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
         if not await gacha.get_collection(member, 'names'):
             embed = discord.Embed(title=f'{member.display_name}\'s Collection', description=f'This collection is empty :(', color=ErrorColour)
             embed.set_thumbnail(url=member.display_avatar)
@@ -338,15 +268,6 @@ def run_discord_bot():
         if member is None:
             member = interaction.user
 
-        if await gacha.getGacha(member) is None:
-            embed = discord.Embed(title='Collection Error', description=f'{member.mention} does not have a collection!', color=ErrorColour)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        if not await gacha.get_collection(member, 'names'):
-            embed = discord.Embed(title=f'{member.display_name}\'s Collection', description=f'This collection is empty :(', color=ErrorColour)
-            embed.set_thumbnail(url=member.display_avatar)
-            await interaction.response.send_message(embed=embed)
-            return
         if series not in SERIES_LIST:
             embed = discord.Embed(title='Series Error', description=f'**{series}** not found.', color=ErrorColour)
             await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -355,10 +276,9 @@ def run_discord_bot():
         progress = await gacha.get_series_progress(member, series)
         
         total = len(progress)
-        owned = len([x for x in progress if x.level > 0])
+        owned = len([x for x in progress.values() if x > 0])
 
-        progress = list(map(lambda character: f"{gacha.get_rarity_emoji(character.rarity)} {character.name} {f'**{int(character.level)}** ⭐' if character.level != 0 else '🔒'}", progress))
-
+        progress = [to_progress_string(x) for x in progress.items()]
 
         embeds: list[discord.Embed] = []
         while progress:
@@ -396,17 +316,14 @@ def run_discord_bot():
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        if await gacha.getGacha(interaction.user) is None:
-            embed = discord.Embed(title='Collection Error', description='You do not have a collection!', color=ErrorColour)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
+        await gacha.verify_collection(interaction.user)
 
-       
         pull: gacha.Character = await gacha.do_spin(interaction.user)
-        await set_remaining_spins(interaction.user, remaining_spins - 1)
 
+        await set_remaining_spins(interaction.user, remaining_spins - 1)
         spin = gacha.Spin(interaction, pull)
         await spin.create()
+        
 
         
 
@@ -421,67 +338,11 @@ def run_discord_bot():
         if member is None:
             member = interaction.user
 
-        if await gacha.getGacha(member) is None:
-            embed = discord.Embed(title='Collection Error', description=f'{member.mention} does not have a collection!', color=ErrorColour)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
+        await gacha.verify_collection(member)
 
         await interaction.response.defer()
 
-    
         embed, file = await gacha.partyDisplay(member)
-
-
-
-        # edit_button = discord.ui.Button(
-        #     emoji='✍️',
-        #     style=discord.ButtonStyle.red
-        # )
-        # clear_button = discord.ui.Button(
-        #     label='Clear',
-        #     style=discord.ButtonStyle.grey
-        # )
-
-        # view = View()
-        # view.add_item(edit_button)
-        # view.add_item(clear_button)
-
-
-        # slotSelect = SlotSelect(interaction, embed, file, view)
-        # view2 = View()
-        # view2.add_item(slotSelect)
-
-
-        # async def edit_callback(binteraction: discord.Interaction):
-        #     if binteraction.user != member:
-        #         error = discord.Embed(title='User Error', description='This is not your party!', color=ErrorColour)
-        #         await binteraction.response.send_message(embed=error, ephemeral=True)
-        #         return
-
-        #     await binteraction.response.edit_message(view=view2)
-
-
-        # async def clear_callback(cinteraction: discord.Interaction):
-        #     if cinteraction.user != member:
-        #         error = discord.Embed(title='User Error', description='This is not your party!', color=ErrorColour)
-        #         await cinteraction.response.send_message(embed=error, ephemeral=True)
-        #         return
-            
-        #     await gacha.clearParty(member)
-
-        #     embed3 = discord.Embed(title='Party Cleared', description=f'All slots in your Party have been reset.', color=0x5fb964)
-        #     await cinteraction.response.send_message(embed=embed3, ephemeral=True)
-
-
-
-
-        # edit_button.callback = edit_callback
-        # clear_button.callback = clear_callback
-
-        # if interaction.user == member:
-        #     await interaction.followup.send(embed=embed, file=file, view=view)
-        # else:
-        #     await interaction.followup.send(embed=embed, file=file)
         await interaction.followup.send(embed=embed, file=file)
     
 
@@ -497,10 +358,7 @@ def run_discord_bot():
     ])
     @app_commands.autocomplete(character=autocomplete_collection)
     async def add(interaction: discord.Interaction, slot: app_commands.Choice[int], character: str):
-        if await gacha.getGacha(interaction.user) is None:
-            embed = discord.Embed(title='Collection Error', description=f'{interaction.user.mention} does not have a collection!', color=ErrorColour)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
+        await gacha.verify_collection(interaction.user)
         
         if character not in CHARACTER_LIST:
             embed = discord.Embed(title='Character Error', description=f'No such character "{character}".', color=ErrorColour)
@@ -514,11 +372,13 @@ def run_discord_bot():
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
-        await gacha.edit_slot(interaction.user, f'slot{slot.value}', character)
+        character: BaseChar = [char for char in CHARACTERS.values() if char.name == character][0]
+        
+        await gacha.edit_slot(interaction.user, f'slot{slot.value}', character.id)
 
         embed, file = await gacha.partyDisplay(interaction.user)
 
-        embed.description = f'Successfully added **{character}** to Slot **{slot.value}**!'
+        embed.description = f'Successfully added **{character.name}** to Slot **{slot.value}**!'
         embed.color = 0x36ec42
 
         await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
@@ -538,8 +398,7 @@ def run_discord_bot():
     @app_commands.autocomplete(character=autocomplete_character)
     async def character(interaction: discord.Interaction, character: str):
         
-        
-        
+
         if character not in CHARACTER_LIST:
             
             if get_close_matches(character, CHARACTER_LIST):
@@ -550,152 +409,42 @@ def run_discord_bot():
                 embed = discord.Embed(title='Character Error', description=f'No such character "{character}".', color=ErrorColour)
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
+            
+        character: BaseChar = [char for char in CHARACTERS.values() if char.name == character][0]
 
-        level = await gacha.getStars(interaction.user, character)
+        level = await gacha.get_character_level(interaction.user, character.id)
         if level is None:
             level = 0
 
-        embed: discord.Embed = await gacha.get_character(character, level).display()
+        embed: discord.Embed = await character.display(level, 0xb71010)
 
-        portrait = discord.File(f'Portraits/{character}.jpg', filename='portrait.jpg')
+        portrait = discord.File(f'Portraits/{character.id}.jpg', filename='portrait.jpg')
         embed.set_image(url=f'attachment://portrait.jpg')
 
-        await interaction.response.send_message(embed=embed, file=portrait)
+        await interaction.response.send_message(embed=embed, file=portrait, view=CharInfo(interaction, character, level))
         
 
 
-    # ###### BATTLE
-    # @tree.command(
-    #         name = 'battle',
-    #         description = 'Challenge (either open challenge or specific member) to a battle.',
-    #         guild = discord.Object(id=SERVER)
-    # )
-    # async def battle(interaction: discord.Interaction, member: discord.Member = None):
+    @info_group.command(description='Display a card\'s information.')
+    @app_commands.autocomplete(card=autocomplete_card)
+    async def card(interaction: discord.Interaction, card: str):
+        if card not in CARD_LIST:
+            await interaction.response.send_message(embed=discord.Embed(description=f'No such card "{card}".', color=ErrorColour), ephemeral=True)
+            return
         
-        
-    #     if await gacha.in_active_battle(interaction.user) == True:
-    #         embed = discord.Embed(title='Battle Error', description=f'You are already participating in a battle!', color=ErrorColour)
-    #         await interaction.response.send_message(embed=embed, ephemeral=True)
-    #         return
-        
-    #     userParty = await gacha.getParty(interaction.user)
-    #     if userParty[0] is None or userParty[1] is None or userParty[2] is None:
-    #         embed = discord.Embed(title='Party Error', description=f'You must have 3 Active Party Members to participate in a battle!', color=ErrorColour)
-    #         await interaction.response.send_message(embed=embed, ephemeral=True)
-    #         return
+        await interaction.response.defer()
+        card: BaseCard = Cards[card.upper().replace(' ', '_')].value
 
-    #     if member is None:
-    #         desc = 'an open challenge'
-    #     else:
-    #         desc = f'a challenge to {member.mention}'
+        card_description = await card.info_text()
+        embed = discord.Embed(
+            title = f"{card.name.title()} ({card.cost})",
+            description = card_description,
+            color = 0xfcba03
+        )
+        if card.tags:
+            embed.set_footer(text=', '.join(card.tags).title())
 
-    #     embed = discord.Embed(
-    #         title= 'Battle Challenge',
-    #         description= f'{interaction.user.mention} has issued {desc}!',
-    #         color = 0xf637e3
-    #     )
-    #     embed.set_author(name=f'{interaction.user.display_name}', icon_url=f'{interaction.user.display_avatar}')
-
-    #     acceptButton = discord.ui.Button(emoji='⚔️', style=discord.ButtonStyle.red)
-
-    #     view = View()
-    #     view.add_item(acceptButton)
-
-    #     async def accept_callback(binteraction: discord.Interaction):
-
-    #         if binteraction.user == interaction.user:
-    #             embed2 = discord.Embed(title='Challenge Error', description='You cannot accept your own challenge!', color=ErrorColour)
-    #             await binteraction.response.send_message(embed=embed2, ephemeral=True)
-    #             return
-            
-    #         if member is not None:
-    #             if binteraction.user != member:
-    #                 embed2 = discord.Embed(title='Challenge Error', description='This challenge was not for you!', color=ErrorColour)
-    #                 await binteraction.response.send_message(embed=embed2, ephemeral=True)
-    #                 return
-    #         if await gacha.in_active_battle(binteraction.user) == True:
-    #             embed2 = discord.Embed(title='Battle Error', description=f'You are already participating in a battle!', color=ErrorColour)
-    #             await binteraction.response.send_message(embed=embed2, ephemeral=True)
-    #             return
-                
-    #         buserParty = await gacha.getParty(binteraction.user)
-    #         if buserParty[0] is None or buserParty[1] is None or buserParty[2] is None:
-    #             embed2 = discord.Embed(title='Party Error', description=f'You must have 3 Active Party Members to participate in a battle!', color=ErrorColour)
-    #             await binteraction.response.send_message(embed=embed2, ephemeral=True)
-    #             return
-            
-    #         emptyView = View()
-    #         await binteraction.response.edit_message(embed=embed, view=emptyView)
-            
-    #         message = await interaction.original_response()
-
-    #         await battles.doBattle(message, interaction.user, binteraction.user)
-
-    #     acceptButton.callback = accept_callback
-
-    #     await interaction.response.send_message(embed=embed, view=view)
-        
-
-    #     await battle
-
-    # ##### CAMPAIGN
-    # @tree.command(
-    #         name = 'campaign',
-    #         description = 'Use your party to battle preset stages and earn rewards!.',
-    #         guild = discord.Object(id=SERVER)
-    # )
-    # async def campaign(interaction: discord.Interaction):
-        
-
-    #     userParty = await gacha.getParty(interaction.user)
-    #     if userParty[0] is None or userParty[1] is None or userParty[2] is None:
-    #         embed = discord.Embed(title='Party Error', description=f'You must have 3 Active Party Members to participate in a battle!', color=ErrorColour)
-    #         await interaction.response.send_message(embed=embed, ephemeral=True)
-    #         return
-
-    #     await interaction.response.defer()
-
-    #     stage = await gacha.getCampaignStage(interaction.user)
-    #     maxStage = await gacha.getMaxStage()
-
-    #     if stage > maxStage:
-    #         embed = discord.Embed(title='Campaign Complete!', description=f'Congratulations, {interaction.user.mention}! You have completed all of the current campaign stages! Check back in the future when more stages are added.', color=0x7f5fb9)
-    #         await interaction.followup.send(embed=embed)
-    #         return
-        
-
-    #     embed = await gacha.partyDisplay(interaction.user, True)
-
-    #     file = discord.File(f'Campaign/Stage {stage}.png', filename='party.png')
-    #     embed.set_image(url=f'attachment://party.png')
-
-
-    #     acceptButton = discord.ui.Button(emoji='⚔️', style=discord.ButtonStyle.red)
-
-    #     view = View()
-    #     view.add_item(acceptButton)
-
-    #     async def accept_callback(binteraction: discord.Interaction):
-
-    #         if binteraction.user != interaction.user:
-    #             embed2 = discord.Embed(title='Error', description='This is not your campaign!', color=ErrorColour)
-    #             await binteraction.response.send_message(embed=embed2, ephemeral=True)
-    #             return
-            
-            
-    #         emptyView = View()
-    #         await binteraction.response.edit_message(embed=embed, view=emptyView, attachments=[])
-            
-    #         message = await interaction.original_response()
-
-    #         difficulty = await gacha.getStageDifficulty(stage)
-
-    #         await battles.doBattle(message, interaction.user, campaigner, difficulty)
-
-    #     acceptButton.callback = accept_callback
-
-    #     await interaction.followup.send(embed=embed, file=file, view=view)
-
+        await interaction.followup.send(embed=embed)
 
     ##### STATUS
     @tree.command(
@@ -727,22 +476,14 @@ def run_discord_bot():
             embed2 = discord.Embed(title='Error', description='You do not have permission!', color=ErrorColour)
             await interaction.response.send_message(embed=embed2, ephemeral=True)
             return
+        
+        await interaction.response.defer()
 
-        db = sqlite3.connect('stats.sqlite')
-        cursor = db.cursor()
-
-        cursor.execute('SELECT name FROM stats')
-        names = cursor.fetchall()
-
-        cursor.close()
-        db.close()
+        ids = tuple(CHARACTERS.keys())
+        missing = []
 
         db = sqlite3.connect('gacha.sqlite')
         cursor = db.cursor()
-
-        names = tuple([name[0] for name in names])
-
-        missing = []
 
         cursor.execute('PRAGMA table_info(collection)')
         columns = cursor.fetchall()
@@ -752,12 +493,12 @@ def run_discord_bot():
 
         columns = [x[1] for x in columns]
 
-        for name in names:
-            if name not in columns:
-                missing.append(name)
+        for id in ids:
+            if id not in columns:
+                missing.append(id)
 
         if not missing:
-            await interaction.response.send_message('No missing characters :D')
+            await interaction.followup.send('No missing characters :D')
             return
         
         db = sqlite3.connect('gacha.sqlite')
@@ -770,8 +511,8 @@ def run_discord_bot():
         cursor.close()
         db.close()
 
-        missing = '\n'.join(missing)
-        await interaction.response.send_message(f'# Missing Characters Added:\n{missing}')
+        added = "\n".join([CHARACTERS[char].name for char in missing])
+        await interaction.followup.send(f'# Missing Characters Added:\n{added}')
 
 
     ##### WISHINFO
@@ -847,14 +588,14 @@ def run_discord_bot():
         c = 0
         for _ in range(number):
 
-            display, pull = await gacha.do_spin(interaction.user)
-            rarity = await gacha.get_rarity(pull)
+            pull = await gacha.do_spin(interaction.user)
+            rarity = pull.rarity
 
-            if rarity == 'shining':
+            if rarity == 3:
                 sh += 1
-            elif rarity == 'glowing':
+            elif rarity == 2:
                 gl += 1
-            elif rarity == 'common':
+            elif rarity == 1:
                 c += 1
         
         embed = discord.Embed(title='Spins Simulated', description=f'**{sh}** {gacha.shining_emoji}\n**{gl}** {gacha.glowing_emoji}\n**{c}** {gacha.common_emoji}', color=ErrorColour)
@@ -888,14 +629,11 @@ def run_discord_bot():
         global campaigner
         campaigner = guild0.get_member(BOT_ID)
 
-        global CHARACTER_LIST, SERIES_LIST
-        CHARACTER_LIST = get_characters()
-        SERIES_LIST = get_series()
- 
         if not daily.is_running():
             daily.start()
 
         # Sync Commands
+        tree.add_command(info_group, guild=discord.Object(id=SERVER))
         await tree.sync(guild=discord.Object(id=SERVER))
 
         print(f"{client.user} is now running!")
@@ -936,37 +674,6 @@ async def log(log: str, admin: int):
     await channel.send(embed=embed)
 
 
-async def check_freebie(member: discord.Member):
-
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT freebie FROM misc WHERE user_id = {member.id}')
-    freebie = cursor.fetchone()
-
-    cursor.close()
-    db.close()
-
-    if freebie == None:
-        freebie = 0
-    else:
-        freebie = freebie[0]
-    
-    return freebie
-
-async def set_freebie(member: discord.Member, value: int):
-
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
-
-    sql = ('UPDATE misc SET freebie = ? WHERE user_id = ?')
-    val = (value, member.id)
-    cursor.execute(sql, val)
-
-    db.commit()
-    cursor.close()
-    db.close()
-
 
 async def check_last_starpower_update(member: discord.Member) -> dt.datetime:
 
@@ -1000,28 +707,24 @@ async def set_last_starpower_update(member: discord.Member, time: dt.datetime):
 
 async def set_starpower(member: discord.Member, amount: int):
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = (f'UPDATE misc SET starpower = ? WHERE user_id = ?')
+            val = (amount, member.id)
+            await cursor.execute(sql, val)
 
-    sql = (f'UPDATE misc SET starpower = ? WHERE user_id = ?')
-    val = (amount, member.id)
-    cursor.execute(sql, val)
+        await db.commit()
 
-    db.commit()
-    cursor.close()
-    db.close()
 
 
 async def get_starpower(member: discord.Member) -> int:
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT starpower FROM misc WHERE user_id = {member.id}')
+            starpower = await cursor.fetchone()
 
-    cursor.execute(f'SELECT starpower FROM misc WHERE user_id = {member.id}')
-    starpower = cursor.fetchone()[0]
-
-    cursor.close()
-    db.close()
+    starpower = starpower[0]
 
     if not starpower:
         starpower = 0
@@ -1058,14 +761,12 @@ async def get_starpower(member: discord.Member) -> int:
 
 async def get_remaining_spins(member: discord.Member) -> int:
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT spins_left FROM misc WHERE user_id = {member.id}')
-    spins_left = cursor.fetchone()[0]
-
-    cursor.close()
-    db.close()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT spins_left FROM misc WHERE user_id = {member.id}')
+            spins_left = await cursor.fetchone()
+    
+    spins_left = spins_left[0]
 
     if spins_left is None:
         spins_left = 10
@@ -1074,16 +775,13 @@ async def get_remaining_spins(member: discord.Member) -> int:
 
 async def set_remaining_spins(member: discord.Member, amount: int):
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = (f'UPDATE misc SET spins_left = ? WHERE user_id = ?')
+            val = (amount, member.id)
+            await cursor.execute(sql, val)
 
-    sql = (f'UPDATE misc SET spins_left = ? WHERE user_id = ?')
-    val = (amount, member.id)
-    cursor.execute(sql, val)
-
-    db.commit()
-    cursor.close()
-    db.close()
+        await db.commit()
 
 
 def time_to_next_hour() -> int:
@@ -1104,46 +802,14 @@ async def refresh_spins():
     with open ("last_refresh.txt", "w") as file:
         file.write(f'{dt.datetime.now().hour}')
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute('UPDATE misc SET spins_left = 10')
 
-    cursor.execute('UPDATE misc SET spins_left = 10')
-
-    db.commit()
-    cursor.close()
-    db.close()
+        await db.commit()
 
     await log(f'Refreshed spins at **{dt.datetime.now().strftime("%H:%M")}**.', 1)
 
-def get_characters() -> tuple:
-
-    db = sqlite3.connect('stats.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute('SELECT name FROM stats')
-    characters = cursor.fetchall()
-
-    cursor.close()
-    db.close()
-
-    characters = tuple([character[0] for character in characters])
-
-    return characters
-
-def get_series() -> tuple:
-
-    db = sqlite3.connect('stats.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute('SELECT series FROM stats')
-    fetched = cursor.fetchall()
-
-    cursor.close()
-    db.close()
-
-    list = tuple(set([series[0] for series in fetched]))
-
-    return list
 
 async def slot_choices() -> list[app_commands.Choice[str]]:
     return [app_commands.Choice(name=slot) for slot in [1,2,3,4,5,6]]
@@ -1157,36 +823,51 @@ async def autocomplete_collection(interaction: discord.Interaction, current: str
 
 async def get_wish(member: discord.Member) -> str:
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT wish FROM misc WHERE user_id = {member.id}')
+            wish = await cursor.fetchone()
 
-    cursor.execute(f'SELECT wish FROM misc WHERE user_id = {member.id}')
-    wish = cursor.fetchone()[0]
+    return wish[0]
 
-    cursor.close()
-    db.close()
-
-    return wish
 
 async def set_wish(member: discord.Member, wish: str) -> str:
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
 
-    if wish is None:
-        sql = f'UPDATE misc SET wish = null WHERE user_id = ?'
-        val = (member.id,)
-    else:
-        sql = f'UPDATE misc SET wish = ? WHERE user_id = ?'
-        val = (wish, member.id)
+            if wish is None:
+                sql = f'UPDATE misc SET wish = null WHERE user_id = ?'
+                val = (member.id,)
+            else:
+                sql = f'UPDATE misc SET wish = ? WHERE user_id = ?'
+                val = (wish, member.id)
 
-    cursor.execute(sql, val)
-    db.commit()
-    cursor.close()
-    db.close()
+            await cursor.execute(sql, val)
+        await db.commit()
+
+def to_progress_string(character: tuple) -> str:
+    char: BaseChar = character[0]
+    level = character[1]
+
+    return f"{gacha.get_rarity_emoji(char.rarity)} {char.name} {f'**{int(level)}** ⭐' if level != 0 else '🔒'}"
+
 
 async def autocomplete_series(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-    return [app_commands.Choice(name=series, value=series) for series in SERIES_LIST if current.lower() in series.lower()]
+    series = [app_commands.Choice(name=series, value=series) for series in SERIES_LIST if current.lower() in series.lower()]
+    if len(series) > 25:
+        series = series[:25]
+    return series
 
 async def autocomplete_character(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-    return [app_commands.Choice(name=character, value=character) for character in CHARACTER_LIST if current.lower() in character.lower()]
+    chars = [app_commands.Choice(name=character, value=character) for character in CHARACTER_LIST if current.lower() in character.lower()]
+    if len(chars) > 25:
+        chars = chars[:25]
+    return chars
+
+async def autocomplete_card(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    cards = [app_commands.Choice(name=card, value=card) for card in CARD_LIST if current.lower() in card.lower()]
+    if len(cards) > 25:
+        cards = cards[:25]
+    return cards
+    

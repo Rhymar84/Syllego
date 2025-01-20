@@ -5,6 +5,8 @@ import bot
 import math
 import datetime as dt
 import asyncio
+import aiosqlite
+from character_database import CHARACTERS, BaseChar
 from time import perf_counter
 from PIL import Image
 from io import BytesIO
@@ -103,10 +105,13 @@ class Character():
 
 
 class Spin(discord.ui.View):
-    def __init__(self, original_interaction: discord.Interaction, character: Character):
+    def __init__(self, original_interaction: discord.Interaction, character: BaseChar):
         super().__init__()
         self.original_interaction = original_interaction
         self.character = character
+        self.character_level = 0
+        self.is_new = False
+        self.timeout = 180
 
     @discord.ui.button(emoji='<:claim:1149647515063439380>', style=discord.ButtonStyle.grey)
     async def summon_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -124,14 +129,13 @@ class Spin(discord.ui.View):
             return
         
 
-        char_level = await give_character(interaction.user, self.character.name)
+        char_level = await give_character(interaction.user, self.character.id)
         await bot.set_starpower(interaction.user, starpower - 50)
         await bot.set_last_starpower_update(interaction.user, dt.datetime.now())
 
-        if char_level == 1.0:
-            self.character = get_character(self.character.name, char_level, 'NEW!!')
-        else:
-            self.character = get_character(self.character.name, char_level)
+        self.character_level = char_level
+        if char_level == 1:
+            self.is_new = True
 
         await self.claim(interaction)
 
@@ -140,22 +144,21 @@ class Spin(discord.ui.View):
 
     async def create(self):
 
-        embed = await self.character.display()
+        self.character_level = await get_character_level(self.original_interaction.user, self.character.id)
 
-        portrait = discord.File(f'Portraits/{self.character.name}.jpg', filename='portrait.jpg')
+        embed = await self.character.display(self.character_level, get_rarity_colour(self.character.rarity))
+
+        portrait = discord.File(f'Portraits/{self.character.id}.jpg', filename='portrait.jpg')
         embed.set_image(url=f'attachment://portrait.jpg')
         embed.set_author(name=f'{self.original_interaction.user.display_name}', icon_url=f'{self.original_interaction.user.display_avatar}')
 
         await self.original_interaction.response.send_message(embed=embed, file=portrait, view=self)
 
-        await asyncio.sleep(180)
-        self.stop()
-
     async def claim(self, interaction: discord.Interaction):
 
-        embed = await self.character.display()
+        embed = await self.character.display(self.character_level, 0xb71010, self.is_new)
 
-        portrait = discord.File(f'Portraits/{self.character.name}.jpg', filename='portrait.jpg')
+        portrait = discord.File(f'Portraits/{self.character.id}.jpg', filename='portrait.jpg')
         embed.set_image(url=f'attachment://portrait.jpg')
         embed.set_author(name=f'{interaction.user.display_name}', icon_url=f'{interaction.user.display_avatar}')
 
@@ -176,75 +179,71 @@ class Spin(discord.ui.View):
     
 
 
-async def get_collection(member: discord.Member, format: str='images') -> list[str]:
+async def get_collection(member: discord.Member, format: str='images') -> list:
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT * FROM collection WHERE user_id = {member.id}')
+            levels = await cursor.fetchall()
 
-    cursor.execute(f'SELECT * FROM collection WHERE user_id = {member.id}')
-    characters = cursor.fetchall()[0]
+            await cursor.execute('PRAGMA table_info(collection)')
+            ids = await cursor.fetchall()
 
-    cursor.execute('PRAGMA table_info(collection)')
-    columns = cursor.fetchall()
+    if not levels:
+        return []
+    
+    levels = levels[0]
+    ids = [x[1] for x in ids]
 
-    cursor.close()
-    db.close()
-
-    columns = [x[1] for x in columns]
-
-    collection = list(zip(columns, characters))
+    collection = list(zip(ids, levels))
+    # Removing (user_id and its column)
     collection.pop(0)
 
     collection = [character for character in collection if character[1] is not None]
     collection = sorted(collection, key=lambda x: get_rarity(x[0]), reverse=True)
     
     if format == 'names':
-        return [character[0] for character in collection]
+        return [CHARACTERS[character[0]].name for character in collection]
     
     if format == 'objects':
-        return [get_character(character[0], character[1]) for character in collection]
+        return [{'character': CHARACTERS[character[0]], 'level': character[1]} for character in collection]
 
     if format == 'rarities':
-        return [f'{globals()[f"{get_rarity(character[0])}_emoji"]} {character[0]} **{int(await getStars(member, character[0]))}**⭐' for character in collection]
+        return [f'{globals()[f"{get_rarity(character[0])}_emoji"]} {CHARACTERS[character[0]].name} **{int(await get_character_level(member, character[0]))}**⭐' for character in collection]
     
     embeds = []
     files = []
 
     for index, character in enumerate(collection):
-        name = character[0]
+        id = character[0]
+        level = character[1]
 
-        level = await getStars(member, name)
+        embed: discord.Embed = await CHARACTERS[id].display(level, 0xb71010)
 
-        embed = await character_display(name, level, False)
         footer = str(embed.footer.text)
-
         footer += f'\n({index+1}/{len(collection)})'
         embed.set_footer(text=f'{footer}')
         embed.set_author(name=f'{member.display_name}', icon_url=f'{member.display_avatar}')
         
         embeds.append(embed)
-        files.append(name)
+        files.append(id)
 
     return embeds, files
 
 
 
-async def getGacha(member: discord.Member):
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT * FROM collection WHERE user_id = {member.id}')
-    fetched = cursor.fetchall()
+async def verify_collection(member: discord.Member):
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT * FROM collection WHERE user_id = {member.id}')
+            fetched = await cursor.fetchall()
     
     try:
         fetched = fetched[0]
     except:
-        return None
-
-    cursor.close()
-    db.close()
-
-    return fetched
+        async with aiosqlite.connect("gacha.sqlite") as db:
+            async with db.cursor() as cursor:
+                await cursor.execute(f'INSERT INTO collection (user_id) VALUES({member.id})')
 
 
 def get_character(character: str, level: float=0, xp: str='', colour=0xb71010) -> Character:
@@ -296,17 +295,15 @@ async def do_spin(member: discord.Member):
     roll = random.randint(1, 100)
 
     if roll <= shining_chance:
-        rarity = 'shining'
+        rarity = 3
     elif roll <= shining_chance + glowing_chance:
-        rarity = 'glowing'
+        rarity = 2
     else:
-        rarity = 'common'
+        rarity = 1
 
     pool = get_pool(rarity, wish)
     pull = random.choice(pool)
-    level = await getStars(member, pull)
-
-    pull = get_character(pull, level, colour=globals()[f'{rarity}_colour'])
+    level = await get_character_level(member, pull.id)
 
     return pull
 
@@ -323,7 +320,7 @@ async def multi_spin(member: discord.Member, wheel: str):
     for i in range(10):
         pull = await do_spin(member, wheel)
         rarity = get_rarity(pull)
-        level = await getStars(member, pull)
+        level = await get_character_level(member, pull)
 
         emojiName = f'{rarity}_emoji'
         emoji = globals()[f'{emojiName}']
@@ -350,18 +347,16 @@ async def multi_spin(member: discord.Member, wheel: str):
 
 
 
-async def get_series_progress(member: discord.Member, series: str):
+async def get_series_progress(member: discord.Member, series: str) -> dict:
 
-    char_list = [get_character(x) for x in bot.CHARACTER_LIST]
-    char_list = [x for x in char_list if x.series == series]
+    char_list = [x for x in CHARACTERS.values() if x.series == series]
+    char_list = {x: 0 for x in sorted(char_list, key=lambda x: get_rarity(x.id), reverse=True)}
 
-    collected = await get_collection(member, format='objects')
-    collected = [x for x in collected if x.series == series]
-    char_list = sorted(char_list, key=lambda x: get_rarity(x.name), reverse=True)
-
-    for character in char_list:
-        if character in collected:
-            character.level = [x for x in collected if x == character][0].level
+    collected: list[dict] = await get_collection(member, format='objects')
+    collected = [x for x in collected if x['character'].series == series]
+    
+    for character in collected:
+        char_list[character['character']] = character['level']
     
     return char_list
 
@@ -371,20 +366,17 @@ async def get_series_progress(member: discord.Member, series: str):
 
 async def character_display(name: str, level: float, spin: bool=False, xp: str=''):
 
-    db = sqlite3.connect('stats.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT * FROM stats WHERE name = "{name}"')
-    info = cursor.fetchall()
+    async with aiosqlite.connect("stats.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT * FROM stats WHERE name = "{name}"')
+            info = await cursor.fetchall()
+    
     try:
         info = info[0]
     except IndexError:
         print(f'Error: {name} not found in Stats')
         return
 
-
-    cursor.close()
-    db.close()
 
     rarity = get_rarity(name)
     emoji = globals()[f'{rarity}_emoji']
@@ -412,19 +404,17 @@ async def character_display(name: str, level: float, spin: bool=False, xp: str='
 
     series = info[2]
 
-    growth = info[11]
+    growth = info[9]
     growth = growth * (truncLevel - 1)
 
-    emotion: str = info[3]
-
-    health = info[5] + (growth * 2)
-    attack = info[6] + growth
-    special_attack = info[7] + growth
-    defense = info[8] + growth
-    special_defense = info[9] + growth
-    speed = info[10] + (2 * (int(level) - 1))
+    health = info[3] + (growth * 2)
+    attack = info[4] + growth
+    special_attack = info[5] + growth
+    defense = info[6] + growth
+    special_defense = info[7] + growth
+    speed = info[8] + (2 * (int(level) - 1))
     
-    description = f'Base State: **{emotion.title()}**\n\nHP: **{health}**\nAtk: **{attack}** | Def: **{defense}**\nSp.A: **{special_attack}** | Sp.D: **{special_defense}**\nSpeed: **{speed}**'
+    description = f'**\n\nHP: **{health}**\nAtk: **{attack}** | Def: **{defense}**\nSp.A: **{special_attack}** | Sp.D: **{special_defense}**\nSpeed: **{speed}**'
 
     embed = discord.Embed(title=f'{emoji} {name} {stars} {xp}', description = f'{description}', color=colour)
     embed.set_footer(text=series)
@@ -442,42 +432,41 @@ async def getStarsString(level):
 
 
 def get_rarity(character: str):
+    rarity = CHARACTERS[character].rarity
+    return 'shining' if rarity == 3 else 'glowing' if rarity == 2 else 'common'
 
-    db = sqlite3.connect('stats.sqlite')
-    cursor = db.cursor()
+def get_rarity_emoji(rarity: int):
 
-    cursor.execute(f'SELECT rarity FROM stats WHERE name = "{character}"')
-    rarity = cursor.fetchone()[0]
-
-    cursor.close()
-    db.close()
-
-    return rarity
-
-def get_rarity_emoji(rarity: str):
-
-    if rarity == 'shining':
+    if rarity == 3:
         return shining_emoji
     
-    if rarity == 'glowing':
+    if rarity == 2:
         return glowing_emoji
     
-    if rarity == 'common':
+    if rarity == 1:
         return common_emoji
+    
+def get_rarity_colour(rarity: int):
 
-async def getStars(member: discord.Member, character: str):
+    if rarity == 3:
+        return shining_colour
+    
+    if rarity == 2:
+        return glowing_colour
+    
+    if rarity == 1:
+        return common_colour
 
-    if character is None:
+async def get_character_level(member: discord.Member, id: str):
+
+    if id is None:
         return 0
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT "{id}" FROM collection WHERE user_id = {member.id}')
+            level = await cursor.fetchone()
 
-    cursor.execute(f'SELECT "{character}" FROM collection WHERE user_id = {member.id}')
-    level = cursor.fetchone()
-
-    cursor.close()
-    db.close()
 
     level = level[0]
     
@@ -490,9 +479,7 @@ async def getStars(member: discord.Member, character: str):
 
 async def give_character(member: discord.Member, character: str) -> float:
 
-    level = await getStars(member, character)
-
-    rarity = get_rarity(character)
+    level = await get_character_level(member, character)
     
     if level == 0:
         newLevel = 1
@@ -501,30 +488,24 @@ async def give_character(member: discord.Member, character: str) -> float:
     else:
         newLevel = level + 1
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = (f'UPDATE collection SET "{character}" = ? WHERE user_id = ?')
+            val = (newLevel, member.id)
+            await cursor.execute(sql, val)
 
-    sql = (f'UPDATE collection SET "{character}" = ? WHERE user_id = ?')
-    val = (newLevel, member.id)
-    cursor.execute(sql, val)
-
-    db.commit()
-    cursor.close()
-    db.close()
+        await db.commit()
 
     return newLevel
 
 
 async def getParty(member: discord.Member):
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
 
-    cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party WHERE user_id = {member.id}')
-    party = cursor.fetchall()
-
-    cursor.close()
-    db.close()
+            await cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party WHERE user_id = {member.id}')
+            party = await cursor.fetchall()
 
     try:
         party = party[0]
@@ -536,64 +517,33 @@ async def getParty(member: discord.Member):
 
 async def partyDisplay(member: discord.Member, campaign: bool=False):
 
-    if campaign == False:
-        party = await getParty(member)
+    party = await getParty(member)
+    party = [{'character': CHARACTERS[x].id, 'level': await get_character_level(member, x)} if x in CHARACTERS.keys() else {'character': None, 'level': 0} for x in party]
 
-        slot1 = [party[0], await getStars(member, party[0])]
-        slot2 = [party[1], await getStars(member, party[1])]
-        slot3 = [party[2], await getStars(member, party[2])]
-        slot4 = [party[3], await getStars(member, party[3])]
-        slot5 = [party[4], await getStars(member, party[4])]
-        slot6 = [party[5], await getStars(member, party[5])]
+    party[0]['pos'] = (133, 133)
+    party[1]['pos'] = (789, 133)
+    party[2]['pos'] = (1444, 133)
+    party[3]['pos'] = (132, 888)
+    party[4]['pos'] = (789, 888)
+    party[5]['pos'] = (1444, 888)
 
-    else:
-        campaignParty = await getCampaignParty(member)
-
-        party = campaignParty[0]
-        levels = campaignParty[1]
-
-        slot1 = [party[0], levels[0]]
-        slot2 = [party[1], levels[1]]
-        slot3 = [party[2], levels[2]]
-        slot4 = [party[3], levels[3]]
-        slot5 = [party[4], levels[4]]
-        slot6 = [party[5], levels[5]]
-
-
-    pos1 = (133, 133)
-    pos2 = (789, 133)
-    pos3 = (1444, 133)
-    pos4 = (132, 888)
-    pos5 = (789, 888)
-    pos6 = (1444, 888)
+    party = [d for d in party if d['character'] is not None]
 
     base = Image.open('Assets/Party Themes/Base.png')
 
+    for character in party:
 
-    for index, character in enumerate(party):
+        char = Image.open(f"Party/{character['character']}.png")
+        level = Image.open(f"Assets/Level {character['level']}.png")
 
-        slot = locals()[f'slot{index + 1}']
-
-        if slot[0] is None:
-            continue
-        
-        stars = math.trunc(slot[1])
-
-        pos = locals()[f'pos{index + 1}']
-
-        char = Image.open(f'Party/{character}.png')
-
-        level = Image.open(f'Assets/Level {stars}.png')
-
-        base.paste(char, (pos))
-        base.paste(level, (pos), level)
+        base.paste(char, (character['pos']))
+        base.paste(level, (character['pos']), level)
 
 
     embed = discord.Embed(
         title=f'',
         color = 0xf69337
     )
-
 
     with BytesIO() as image_binary:
         party_image = base.convert('RGB')
@@ -612,23 +562,24 @@ async def edit_slot(member: discord.Member, slot: str, character: str):
 
     slot_index = slot[4::4]
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party WHERE user_id = {member.id}')
+            party = await cursor.fetchall()
+            party = party[0]
 
-    cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party WHERE user_id = {member.id}')
-    party = cursor.fetchall()
-    party = party[0]
-
-    for index, char in enumerate(party):
-        if character == char:
-            sql = (f'UPDATE party SET slot{index+1} = null WHERE user_id = ?')
-            val = (member.id,)
-            cursor.execute(sql, val) 
+            for index, char in enumerate(party):
+                if character == char:
+                    sql = (f'UPDATE party SET slot{index+1} = null WHERE user_id = ?')
+                    val = (member.id,)
+                    await cursor.execute(sql, val) 
 
 
-    sql = (f'UPDATE party SET {slot} = ? WHERE user_id = ?')
-    val = (character, member.id)
-    cursor.execute(sql, val)
+            sql = (f'UPDATE party SET {slot} = ? WHERE user_id = ?')
+            val = (character, member.id)
+            await cursor.execute(sql, val)
+        
+        await db.commit()
 
     # if int(slot_index) in [1, 2, 3]:
     #     moves = await get_moves(character)
@@ -639,29 +590,23 @@ async def edit_slot(member: discord.Member, slot: str, character: str):
     #     val = (moves, member.id)
     #     cursor.execute(sql, val)
 
-    db.commit()
-    cursor.close()
-    db.close()
-
 
 async def clearParty(member: discord.Member):
 
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
+    async with aiosqlite.connect("gacha.sqlite") as db:
+        async with db.cursor() as cursor:
 
-    for index in range(6):
-        sql = (f'UPDATE party SET slot{index+1} = null WHERE user_id = ?')
-        val = (member.id,)
-        cursor.execute(sql, val) 
+            for index in range(6):
+                sql = (f'UPDATE party SET slot{index+1} = null WHERE user_id = ?')
+                val = (member.id,)
+                await cursor.execute(sql, val) 
 
-    db.commit()
-    cursor.close()
-    db.close()
+        await db.commit()
 
 
 async def characterInfo(member: discord.Member, character: str):
     
-    level = await getStars(member, character)
+    level = await get_character_level(member, character)
     if level is None:
         level = 0
 
@@ -869,47 +814,7 @@ async def getMaxStage():
     return maxStage
 
 
-def get_pool(rarity: str, series: str):
-
-    db = sqlite3.connect('stats.sqlite')
-    cursor = db.cursor()
-
-    if series is None:
-        sql = (f'SELECT name FROM stats WHERE rarity = ?')
-        val = (rarity,)
-    else:
-        sql = (f'SELECT name FROM stats WHERE rarity = ? AND series = ?')
-        val = (rarity, series)
-
-
-    cursor.execute(sql, val)
-    pool = cursor.fetchall()
-
-    cursor.close()
-    db.close()
-
-    pool = [character[0] for character in pool]
-
+def get_pool(rarity: int, series: str):
+    pool = [character for character in CHARACTERS.values() if character.rarity == rarity]
     return pool
-
-
-######### MONTE CARLO ALGORITHM
-
-
-async def get_moves(character: str) -> list:
-
-    db = sqlite3.connect('stats.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT strategies FROM stats WHERE name = "{character.title()}"')
-    moves = cursor.fetchall()
-
-    cursor.close()
-    db.close()
-
-    moves: str = moves[0][0]
-
-    moves = moves.split(', ')
-
-    return moves
 
