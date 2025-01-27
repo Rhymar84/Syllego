@@ -7,6 +7,7 @@ import datetime as dt
 import asyncio
 import aiosqlite
 from character_database import CHARACTERS, BaseChar
+from battles.characters import FIGHTERS
 from time import perf_counter
 from PIL import Image
 from io import BytesIO
@@ -16,6 +17,7 @@ from discord.ui import Select, View
 from config import TOKEN, ErrorColour
 from config import SERVER
 from config import DEBUG
+from dataclasses import dataclass, field
 
 intents = discord.Intents.all()
 intents.message_content = True
@@ -44,63 +46,6 @@ POOL_BASE_SHINING = ['Ayanokōji Kiyotaka', 'Horikita Suzune', 'Ichinose Honami'
 
 
 ########################################################################################
-
-
-class Character():
-
-    def __init__(self, name: str, rarity: str, series: str, health: int, attack: int, magic_power: int, armor: int, magic_defense: int, speed: int, 
-                 level: float=0, xp: str='', colour=0xb71010):
-        self.name = name
-        self.rarity = rarity
-        self.series = series
-
-        self.health = health
-        self.attack = attack
-        self.magic_power = magic_power
-        self.armor = armor
-        self.magic_defense = magic_defense
-        self.speed = speed
-
-        self.level = level
-        self.xp = xp
-        self.colour = colour
-
-    def __str__(self) -> str:
-        return self.name
-    
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, Character):
-            return False
-        
-        return self.name == __value.name
-    
-
-    async def display(self) -> discord.Embed:
-
-        emoji = globals()[f'{self.rarity}_emoji']
-
-        truncLevel = math.trunc(self.level)
-
-        xp = self.xp
-        if not xp:
-            if self.level >= 5:
-                xp = '(Max Level)'
-            else:
-                xp = ''
-        
-
-        if self.level != 0:
-            stars = '⭐' * truncLevel
-        else:
-            stars = '🔒'
-
-        series = self.series
-
-        embed = discord.Embed(title=f'{emoji} {self.name} {stars} {xp}', color=self.colour)
-        embed.set_footer(text=series)
-
-        return embed
-
 
 
 
@@ -139,26 +84,32 @@ class Spin(discord.ui.View):
 
         await self.claim(interaction)
 
-        
-
+    
 
     async def create(self):
 
         self.character_level = await get_character_level(self.original_interaction.user, self.character.id)
+        if self.character_level >= 5:
+            self.remove_item(self.summon_button)
+            self.add_item(TakeJarButton(self.original_interaction, self.character, self.character_level))
 
         embed = await self.character.display(self.character_level, get_rarity_colour(self.character.rarity))
 
-        portrait = discord.File(f'Portraits/{self.character.id}.jpg', filename='portrait.jpg')
+        portrait = discord.File(f'Assets/Portraits/{self.character.id}.jpg', filename='portrait.jpg')
         embed.set_image(url=f'attachment://portrait.jpg')
         embed.set_author(name=f'{self.original_interaction.user.display_name}', icon_url=f'{self.original_interaction.user.display_avatar}')
-
+        
+        remaining_spins = await bot.get_remaining_spins(self.original_interaction.user)
+        await bot.set_remaining_spins(self.original_interaction.user, remaining_spins - 1)
         await self.original_interaction.response.send_message(embed=embed, file=portrait, view=self)
+
+
 
     async def claim(self, interaction: discord.Interaction):
 
         embed = await self.character.display(self.character_level, 0xb71010, self.is_new)
 
-        portrait = discord.File(f'Portraits/{self.character.id}.jpg', filename='portrait.jpg')
+        portrait = discord.File(f'Assets/Portraits/{self.character.id}.jpg', filename='portrait.jpg')
         embed.set_image(url=f'attachment://portrait.jpg')
         embed.set_author(name=f'{interaction.user.display_name}', icon_url=f'{interaction.user.display_avatar}')
 
@@ -169,8 +120,117 @@ class Spin(discord.ui.View):
 
 
 
+class TakeJarButton(discord.ui.Button):
+    
+    def __init__(self, original_interaction: discord.Interaction, character: BaseChar, level: int, *, style = discord.ButtonStyle.grey, label = None, disabled = False, custom_id = None, url = None, emoji = None, row = None, sku_id = None):
+        super().__init__(style=style, label=label, disabled=disabled, custom_id=custom_id, url=url, emoji='✨', row=row, sku_id=sku_id)
+        self.original_interaction = original_interaction
+        self.character = character
+        self.character_level = level
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user == self.original_interaction.user:
+            return True
+        await interaction.response.send_message(ephemeral=True, embed=discord.Embed(description='This is not your spin!', color=ErrorColour))
+        return False
+    
+    async def callback(self, interaction: discord.Interaction):
+
+        starpower = await bot.get_starpower(interaction.user)
+        
+        if starpower < 50:
+            embed = discord.Embed(title='Not Enough Starpower :(', description=f'Your summons cost 50% Starpower, but you only have **{starpower}%**. Starpower recharges at a rate of 20%/h.', color=ErrorColour)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        await bot.set_starpower(interaction.user, starpower - 50)
+        await bot.set_last_starpower_update(interaction.user, dt.datetime.now())
+
+        jars_gained = 1 if self.character.rarity == 1 else 3 if self.character.rarity == 2 else 10
+        await gain_jars(interaction.user, jars_gained)
+
+        embed = await self.character.display(self.character_level, 0x710ddb)
+
+        portrait = discord.File(f'Assets/Portraits/{self.character.id}.jpg', filename='portrait.jpg')
+        embed.set_image(url=f'attachment://portrait.jpg')
+        embed.set_author(name=f'{interaction.user.display_name}', icon_url=f'{interaction.user.display_avatar}')
+
+        await interaction.response.edit_message(embed=embed, attachments=[portrait], view=None)
+
+        channel = interaction.channel
+        await channel.send(f'**{interaction.user.display_name}** made an offering to the stars, and captured **{jars_gained}** Star in a Jar{"s"[:(jars_gained)^1]}.')
 
 
+
+@dataclass
+class PartyObject():
+    member: discord.Member
+    party: list[dict] = field(default_factory=list, init=False)
+
+    def __iter__(self):
+        return iter(self.party)
+
+    async def set_party(self):
+        party = await get_party(self.member)
+        party = [{'character': CHARACTERS[x], 'level': await get_character_level(self.member, x), 'chemistry': 0} if x in CHARACTERS.keys() else {'character': None, 'level': 0} for x in party]
+
+        party[0]['pos'] = (133, 133)
+        party[1]['pos'] = (789, 133)
+        party[2]['pos'] = (1444, 133)
+        party[3]['pos'] = (132, 888)
+        party[4]['pos'] = (789, 888)
+        party[5]['pos'] = (1444, 888)
+
+        party = [d for d in party if d['character'] is not None]
+
+        self.party = party
+
+    async def calculate_chemistry(self):
+        for fighter in self.party:
+            character: BaseChar = fighter['character']
+            
+            series_match = [x for x in self.party if x['character'].series == character.series]
+            colour_match = [x for x in self.party if FIGHTERS[x['character'].id]['attribute'] == FIGHTERS[character.id]['attribute']]
+            tag_match = [x for x in self.party if set(FIGHTERS[x['character'].id]['chemistry_tags']) & set(FIGHTERS[character.id]['chemistry_tags'])] 
+
+            series_chemistry = min(int(len(series_match) / 3), 2)
+            colour_chemistry = int(len(colour_match) / 2)
+            tag_chemistry = int(len(tag_match) / 2)
+
+            fighter['chemistry'] = min(sum([series_chemistry, colour_chemistry, tag_chemistry]), 3)
+
+    async def display(self) -> tuple[discord.Embed, discord.File]:
+
+        base: Image.Image = Image.open('Assets/Party Themes/Base.png')
+
+        for character in self.party:
+            
+            try:
+                char = Image.open(f"Assets/Party/{character['character'].id}.png")
+            except FileNotFoundError:
+                char = Image.open(f"Assets/missing_asset.png")
+
+            level = Image.open(f"Assets/Level {character['level']}.png")
+
+            base.paste(char, (character['pos']))
+            base.paste(level, (character['pos']), level)
+
+
+        embed = discord.Embed(
+            title=f'Team Chemistry: {sum([x["chemistry"] for x in self.party])}/18',
+            color = 0xf69337
+        )
+
+        with BytesIO() as image_binary:
+            party_image = base.convert('RGB')
+            party_image.save(image_binary, 'JPEG')
+            image_binary.seek(0)
+            file = discord.File(fp=image_binary, filename='party.jpeg')
+            embed.set_image(url='attachment://party.jpeg')
+            embed.set_author(name=f'{self.member.display_name}\'s Party', icon_url=f'{self.member.display_avatar}')
+            embed.set_footer(text=f'Use /add to edit a party slot.')
+
+        return embed, file
 
 
 
@@ -232,7 +292,7 @@ async def get_collection(member: discord.Member, format: str='images') -> list:
 
 
 
-async def verify_collection(member: discord.Member):
+async def verify_collection(member: discord.Member, insert_if_missing: bool = True):
     async with aiosqlite.connect("gacha.sqlite") as db:
         async with db.cursor() as cursor:
             await cursor.execute(f'SELECT * FROM collection WHERE user_id = {member.id}')
@@ -241,39 +301,14 @@ async def verify_collection(member: discord.Member):
     try:
         fetched = fetched[0]
     except:
-        async with aiosqlite.connect("gacha.sqlite") as db:
-            async with db.cursor() as cursor:
-                await cursor.execute(f'INSERT INTO collection (user_id) VALUES({member.id})')
-
-
-def get_character(character: str, level: float=0, xp: str='', colour=0xb71010) -> Character:
-
-    db = sqlite3.connect('stats.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT * FROM stats WHERE name = "{character}"')
-    char = cursor.fetchone()
-
-    cursor.close()
-    db.close()
-
-    try:
-        name, rarity, series, hp, atk, mp, pdef, mdef, speed, growth = char
-    except IndexError:
-        return None
-    
-    if level > 1:
-        gain = (int(level) - 1) * growth
-        hp += 2 * gain
-        atk += gain
-        mp += gain
-        pdef += gain
-        mdef += gain
-        speed += int(gain / 2)
-
-    
-    return Character(character, rarity, series, hp, atk, mp, pdef, mdef, speed, level, xp, colour)
-
+        if insert_if_missing:
+            async with aiosqlite.connect("gacha.sqlite") as db:
+                async with db.cursor() as cursor:
+                    await cursor.execute(f'INSERT INTO collection (user_id) VALUES({member.id})')
+        else:
+            return False
+        
+    return True
 
 
 
@@ -303,47 +338,11 @@ async def do_spin(member: discord.Member):
 
     pool = get_pool(rarity, wish)
     pull = random.choice(pool)
-    level = await get_character_level(member, pull.id)
 
     return pull
 
 
 
-
-async def multi_spin(member: discord.Member, wheel: str):
-
-    embeds = []
-    pulls = []
-    recap = ''
-
-
-    for i in range(10):
-        pull = await do_spin(member, wheel)
-        rarity = get_rarity(pull)
-        level = await get_character_level(member, pull)
-
-        emojiName = f'{rarity}_emoji'
-        emoji = globals()[f'{emojiName}']
-
-        embed = await character_display(pull, level, True)
-        footer = str(embed.footer.text)
-
-        footer += f'\n({i+1}/10)'
-        embed.set_footer(text=f'{footer}')
-
-        embed.set_author(name=f'{member.display_name}', icon_url=f'{member.display_avatar}')
-        
-        embeds.append(embed)
-        pulls.append(pull)
-        recap += f'{i+1}. {emoji} **{pull}**\n'
-
-
-    # RECAP EMBED
-    embed = discord.Embed(title='Spin Recap', description=f'{recap}', color=0x1053b7)
-    embeds.append(embed)
-
-    # PAGE COUNTER
-    return embeds, pulls
 
 
 
@@ -360,75 +359,6 @@ async def get_series_progress(member: discord.Member, series: str) -> dict:
     
     return char_list
 
-
-
-
-
-async def character_display(name: str, level: float, spin: bool=False, xp: str=''):
-
-    async with aiosqlite.connect("stats.sqlite") as db:
-        async with db.cursor() as cursor:
-            await cursor.execute(f'SELECT * FROM stats WHERE name = "{name}"')
-            info = await cursor.fetchall()
-    
-    try:
-        info = info[0]
-    except IndexError:
-        print(f'Error: {name} not found in Stats')
-        return
-
-
-    rarity = get_rarity(name)
-    emoji = globals()[f'{rarity}_emoji']
-
-    truncLevel = math.trunc(level)
-
-    if not xp:
-        if level >= 5:
-            xp = '(Max Level)'
-        else :
-            xp = ''
-    
-
-    if level != 0:
-        stars = await getStarsString(truncLevel)
-    else:
-        stars = '🔒'
-        level = 1
-        truncLevel = 1
-
-    if spin == True:
-        colour = globals()[f'{rarity}_colour']
-    else:
-        colour = 0xb71010
-
-    series = info[2]
-
-    growth = info[9]
-    growth = growth * (truncLevel - 1)
-
-    health = info[3] + (growth * 2)
-    attack = info[4] + growth
-    special_attack = info[5] + growth
-    defense = info[6] + growth
-    special_defense = info[7] + growth
-    speed = info[8] + (2 * (int(level) - 1))
-    
-    description = f'**\n\nHP: **{health}**\nAtk: **{attack}** | Def: **{defense}**\nSp.A: **{special_attack}** | Sp.D: **{special_defense}**\nSpeed: **{speed}**'
-
-    embed = discord.Embed(title=f'{emoji} {name} {stars} {xp}', description = f'{description}', color=colour)
-    embed.set_footer(text=series)
-
-    return embed
-
-
-async def getStarsString(level):
-
-    stars = ''
-    for star in range(math.trunc(level)):
-        stars += '⭐'
-    
-    return stars
 
 
 def get_rarity(character: str):
@@ -477,6 +407,7 @@ async def get_character_level(member: discord.Member, id: str):
 
     return level
 
+
 async def give_character(member: discord.Member, character: str) -> float:
 
     level = await get_character_level(member, character)
@@ -499,12 +430,12 @@ async def give_character(member: discord.Member, character: str) -> float:
     return newLevel
 
 
-async def getParty(member: discord.Member):
+async def get_party(member: discord.Member):
 
-    async with aiosqlite.connect("gacha.sqlite") as db:
+    async with aiosqlite.connect("party.sqlite") as db:
         async with db.cursor() as cursor:
 
-            await cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party WHERE user_id = {member.id}')
+            await cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party1 WHERE user_id = {member.id}')
             party = await cursor.fetchall()
 
     try:
@@ -515,62 +446,20 @@ async def getParty(member: discord.Member):
     return party
 
 
-async def partyDisplay(member: discord.Member, campaign: bool=False):
-
-    party = await getParty(member)
-    party = [{'character': CHARACTERS[x].id, 'level': await get_character_level(member, x)} if x in CHARACTERS.keys() else {'character': None, 'level': 0} for x in party]
-
-    party[0]['pos'] = (133, 133)
-    party[1]['pos'] = (789, 133)
-    party[2]['pos'] = (1444, 133)
-    party[3]['pos'] = (132, 888)
-    party[4]['pos'] = (789, 888)
-    party[5]['pos'] = (1444, 888)
-
-    party = [d for d in party if d['character'] is not None]
-
-    base = Image.open('Assets/Party Themes/Base.png')
-
-    for character in party:
-
-        char = Image.open(f"Party/{character['character']}.png")
-        level = Image.open(f"Assets/Level {character['level']}.png")
-
-        base.paste(char, (character['pos']))
-        base.paste(level, (character['pos']), level)
-
-
-    embed = discord.Embed(
-        title=f'',
-        color = 0xf69337
-    )
-
-    with BytesIO() as image_binary:
-        party_image = base.convert('RGB')
-        party_image.save(image_binary, 'JPEG')
-        image_binary.seek(0)
-        file = discord.File(fp=image_binary, filename='party.jpeg')
-        embed.set_image(url='attachment://party.jpeg')
-        embed.set_author(name=f'{member.display_name}\'s Party', icon_url=f'{member.display_avatar}')
-        embed.set_footer(text=f'Use /add to edit a party slot.')
-
-    return embed, file
-
-
 
 async def edit_slot(member: discord.Member, slot: str, character: str):
 
     slot_index = slot[4::4]
 
-    async with aiosqlite.connect("gacha.sqlite") as db:
+    async with aiosqlite.connect("party.sqlite") as db:
         async with db.cursor() as cursor:
-            await cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party WHERE user_id = {member.id}')
+            await cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party1 WHERE user_id = {member.id}')
             party = await cursor.fetchall()
             party = party[0]
 
             for index, char in enumerate(party):
                 if character == char:
-                    sql = (f'UPDATE party SET slot{index+1} = null WHERE user_id = ?')
+                    sql = (f'UPDATE party1 SET slot{index+1} = null WHERE user_id = ?')
                     val = (member.id,)
                     await cursor.execute(sql, val) 
 
@@ -593,228 +482,45 @@ async def edit_slot(member: discord.Member, slot: str, character: str):
 
 async def clearParty(member: discord.Member):
 
-    async with aiosqlite.connect("gacha.sqlite") as db:
+    async with aiosqlite.connect("party.sqlite") as db:
         async with db.cursor() as cursor:
 
             for index in range(6):
-                sql = (f'UPDATE party SET slot{index+1} = null WHERE user_id = ?')
+                sql = (f'UPDATE party1 SET slot{index+1} = null WHERE user_id = ?')
                 val = (member.id,)
                 await cursor.execute(sql, val) 
 
         await db.commit()
 
 
-async def characterInfo(member: discord.Member, character: str):
-    
-    level = await get_character_level(member, character)
-    if level is None:
-        level = 0
-
-    embed = await character_display(character, level, False)
-
-    return embed
-
-
-
-
-
-
-
-
-
-
-######################################################## BATTLE
-
-
-
-
-        
-
-
-
-        
-    
-    
-
-    
-
-    
-
-
-
-
-    
-    
-
-
-async def getCampaignParty(member: discord.Member):
-
-    stage = await getCampaignStage(member)
-
-    db = sqlite3.connect('campaign.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT * FROM campaign WHERE stage = {stage}')
-    stageStats = cursor.fetchall()
-
-    cursor.close()
-    db.close()
-
-    stageStats = stageStats[0]
-
-    stage, char1, char2, char3, char4, char5, char6, char1lv, char2lv, char3lv, char4lv, char5lv, char6lv, rewards, difficulty = stageStats
-
-    return [[char1, char2, char3, char4, char5, char6], [char1lv, char2lv, char3lv, char4lv, char5lv, char6lv]]
-
-
-
-async def getCampaignStage(member: discord.Member):
-
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT campaign FROM misc WHERE user_id = {member.id}')
-    stage = cursor.fetchone()
-
-    cursor.close()
-    db.close()
-
-    stage = stage[0]
-   
-    if stage is None:
-        stage = 1
-    else:
-        pass
-
-    return stage
-    
-
-async def getStageRewards(stage: int):
-    
-    db = sqlite3.connect('campaign.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT rewards FROM campaign WHERE stage = {stage}')
-    rewards = cursor.fetchone()
-
-    cursor.close()
-    db.close()
-
-    rewards = rewards[0]
-
-    return rewards
-
-
-async def getStageDifficulty(stage: int):
-    
-    db = sqlite3.connect('campaign.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT difficulty FROM campaign WHERE stage = {stage}')
-    difficulty = cursor.fetchone()
-
-    cursor.close()
-    db.close()
-
-    difficulty = difficulty[0]
-
-    return difficulty
-
-
-async def advanceStage(member: discord.Member, message: discord.Message):
-
-    stage = await getCampaignStage(member)
-
-    # REWARDS
-    if stage == 1 or stage == 2 or stage == 4 or stage == 5 or stage == 12 or stage == 16:
-        balance = await bot.get_balance(member)
-        await bot.updateBalance(member, balance + 10000)
-
-    elif stage == 7:
-        balance = await bot.get_balance(member)
-        await bot.updateBalance(member, balance + 5000)
-
-    elif stage == 3 or stage == 6 or stage == 11:
-        balance = await bot.getTokens(member)
-        await bot.updateTokens(member, balance + 10)
-
-    elif stage == 13 or stage == 17:
-        await bot.set_freebie(member, 0)
-    
-    elif stage == 8 or stage == 14:
-        faction = await bot.get_faction(member)
-        
-        db = sqlite3.connect('faction.sqlite')
-        cursor = db.cursor()
-
-        cursor.execute(f'SELECT str_xp FROM faction WHERE role_id = {faction.id}')
-        xp = cursor.fetchone()
-        try:
-            xp = xp[0]
-        except:
-            xp = 0
-
-        sql = ('UPDATE faction SET str_xp = ? WHERE role_id = ?')
-        if stage == 8:
-            val = (xp + 15000, faction.id)
-        elif stage == 14:
-            val = (xp + 10000, faction.id)
-
-        cursor.execute(sql, val)
-
-        db.commit()
-        cursor.close()
-        db.close()
-
-        await bot.check_level_up(faction, 'strength')
-    
-    elif stage == 9 or stage == 20:
-        faction = await bot.get_faction(member)
-        
-        await bot.giveFPts(faction, 2)
-
-    elif stage == 10 or stage == 15 or stage == 19:
-        await give_character(member, 'Shiba Katsunori')
-    
-    elif stage == 18:
-        await bot.add_stardust(member, 18000)
-
-
-
-    embed = discord.Embed(title='Stage Completed!', description=f'Congratulations {member.mention}, you completed Stage **{stage}** of the campaign and were awarded {await getStageRewards(stage)}!', color=0x44d5c8)
-    await message.reply(embed=embed)
-    
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
-
-    sql = ('UPDATE misc SET campaign = ? WHERE user_id = ?')
-    val = (stage + 1, member.id)
-    cursor.execute(sql, val)
-
-    db.commit()
-    cursor.close()
-    db.close()
-
-    
-
-
-async def getMaxStage():
-    
-    db = sqlite3.connect('campaign.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT stage FROM campaign ORDER BY stage DESC')
-    maxStage = cursor.fetchone()
-
-    cursor.close()
-    db.close()
-
-    maxStage = maxStage[0]
-
-    return maxStage
 
 
 def get_pool(rarity: int, series: str):
     pool = [character for character in CHARACTERS.values() if character.rarity == rarity]
     return pool
 
+async def get_jars(member: discord.Member, insert_if_none: bool=False):
+    
+    async with aiosqlite.connect("eco.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT jars FROM currencies WHERE user_id = {member.id}')
+            jars = await cursor.fetchone()
+
+    if not jars:
+        if insert_if_none:
+            await bot.insert_user_record('eco', 'currencies', member)
+        jars = [0]
+        
+    return jars[0]
+            
+
+async def gain_jars(member: discord.Member, amount: int):
+
+    current_jars = await get_jars(member, True)
+
+    async with aiosqlite.connect("eco.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = ('UPDATE currencies SET jars = ? WHERE user_id = ?')
+            val = (current_jars + amount, member.id)
+            await cursor.execute(sql, val)
+            await db.commit()

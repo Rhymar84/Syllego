@@ -28,3 +28,14 @@ COLOUR_EMOJI_KEY = {
     'yellow': '🟡',
     'orange': '🟠'
 }
+COLOUR_MATCHUPS = {
+    'red': {'red': 1, 'blue': 0.5, 'green': 1.5, 'yellow': 1, 'orange': 1},
+    'blue': {'red': 1.5, 'blue': 1, 'green': 1, 'yellow': 0.5, 'orange': 1},
+    'green': {'red': 0.5, 'blue': 1, 'green': 1, 'yellow': 1, 'orange': 1.5},
+    'yellow': {'red': 1, 'blue': 1.5, 'green': 1, 'yellow': 1, 'orange': 0.5},
+    'orange': {'red': 1, 'blue': 1, 'green': 0.5, 'yellow': 1.5, 'orange': 1}
+}
+
+# Battle Parameters
+MAX_HAND_SIZE = 5
+DECISION_TIME = 120

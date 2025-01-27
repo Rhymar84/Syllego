@@ -1,7 +1,7 @@
 import discord
 import sqlite3
 import random
-import gacha
+import system.gacha as gacha
 import battles.battles as battles
 import datetime as dt
 import aiosqlite
@@ -16,11 +16,12 @@ from config import TOKEN, BOT_ID, ErrorColour
 from config import SERVER
 from config import DEBUG
 from character_database import CHARACTERS, BaseChar, CharInfo
-from battles.cards import Cards, BaseCard
+from battles.cards import Cards, BaseCard, create_card
+from battles.characters import FIGHTERS
 
 
-CHARACTER_LIST = tuple([character.name for character in CHARACTERS.values()])
-SERIES_LIST = tuple(set(character.series for character in CHARACTERS.values()))
+CHARACTER_LIST = sorted(tuple([character.name for character in CHARACTERS.values()]))
+SERIES_LIST = sorted(tuple(dict.fromkeys([character.series for character in CHARACTERS.values()])))
 CARD_LIST = tuple([card.value.name for card in Cards])
 
 
@@ -88,7 +89,7 @@ class EditSlot(discord.ui.Modal, title = 'Edit Slot'):
         await gacha.edit_slot(interaction.user, self.slot, character)
         await interaction.response.defer()
 
-        embed, file = await gacha.partyDisplay(interaction.user)
+        embed, file = await gacha.party_display(interaction.user)
 
         await self.original_interaction.edit_original_response(embed=embed, attachments=[file], view=self.original_view)
 
@@ -117,7 +118,7 @@ class Book(discord.ui.View):
         if self.file_names:
             embed = self.pages[self.page]
 
-            portrait = discord.File(f'Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
+            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
             embed.set_image(url=f'attachment://portrait.jpg')
 
             await interaction.response.edit_message(embed=embed, attachments=[portrait], view=self)
@@ -140,7 +141,7 @@ class Book(discord.ui.View):
         if self.file_names:
             embed = self.pages[self.page]
 
-            portrait = discord.File(f'Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
+            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
             embed.set_image(url=f'attachment://portrait.jpg')
 
             await interaction.response.edit_message(embed=embed, attachments=[portrait], view=self)
@@ -153,7 +154,7 @@ class Book(discord.ui.View):
         if self.file_names:
             embed = self.pages[0]
 
-            portrait = discord.File(f'Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
+            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
             embed.set_image(url=f'attachment://portrait.jpg')
 
             if len(self.pages) == 1:
@@ -169,6 +170,7 @@ class Book(discord.ui.View):
 
 
 info_group = app_commands.Group(name="info", description="Check information on various battle mechanics.")
+party_group = app_commands.Group(name="party", description="Commands relating to your battle party.")
 
 
 def run_discord_bot():
@@ -259,7 +261,7 @@ def run_discord_bot():
     ###### SERIES
     @tree.command(
             name = 'series',
-            description = 'View your progress for a series!',
+            description = 'View your progress towards collecting a series!',
             guild = discord.Object(id=SERVER)
     )
     @app_commands.autocomplete(series=autocomplete_series)
@@ -296,7 +298,50 @@ def run_discord_bot():
         collection = Book(interaction, embeds)
         await collection.create()
 
+    
+    @tree.command(
+            name = 'badges',
+            description = 'View your progress towards collecting series badges.',
+            guild = discord.Object(id=SERVER)
+    )
+    async def badges(interaction: discord.Interaction, member: discord.Member=None):
+        if member is None:
+            member = interaction.user
         
+        if member == interaction.user:
+            await gacha.verify_collection(member)
+        else:
+            if await gacha.verify_collection(member, False):
+                await interaction.response.send_message(embed=discord.Embed(description='This user is not registered.', color=ErrorColour))
+                return
+        
+        badges = []
+        for series in SERIES_LIST:
+            progress = await gacha.get_series_progress(member, series)
+            
+            total = len(progress)
+            owned = len([x for x in progress.values() if x > 0])
+
+            badges.append({'series': series, 'string': f"{'✅' if total == owned else '🔒'} {series}: **{owned}/{total}**"})
+        
+        embeds: list[discord.Embed] = []
+        while badges:
+            page_names = [x['string'] for x in badges[:20]]
+            
+            embed = discord.Embed(title=f"Badges", description='\n'.join(page_names), color=0xb71010)
+            embed.set_author(name=member.display_name, icon_url=member.display_avatar)
+            embeds.append(embed)
+
+            badges = badges[21:]
+
+        for index, embed in enumerate(embeds):
+            embed.set_footer(text=f'\n({index+1}/{len(embeds)})')
+            
+        collection = Book(interaction, embeds)
+        await collection.create()
+
+
+
 
     
 
@@ -304,7 +349,7 @@ def run_discord_bot():
     ###### SPIN
     @tree.command(
             name = 'spin',
-            description = 'Obtain a random gacha character!',
+            description = 'Roll a random character that can be claimed using starpower!',
             guild = discord.Object(id=SERVER)
     )
     async def spin(interaction: discord.Interaction):
@@ -318,9 +363,8 @@ def run_discord_bot():
 
         await gacha.verify_collection(interaction.user)
 
-        pull: gacha.Character = await gacha.do_spin(interaction.user)
+        pull: BaseChar = await gacha.do_spin(interaction.user)
 
-        await set_remaining_spins(interaction.user, remaining_spins - 1)
         spin = gacha.Spin(interaction, pull)
         await spin.create()
         
@@ -328,30 +372,32 @@ def run_discord_bot():
         
 
     ###### PARTY
-    @tree.command(
-            name = 'party',
-            description = 'View/Edit your active party!',
-            guild = discord.Object(id=SERVER)
-    )
-    async def party(interaction: discord.Interaction, member: discord.Member = None):
+    @party_group.command(description = 'View/Edit your active party!')
+    async def view(interaction: discord.Interaction, member: discord.Member = None):
 
         if member is None:
             member = interaction.user
 
-        await gacha.verify_collection(member)
+        if member == interaction.user:
+            registered = await gacha.verify_collection(member)
+        else:
+            registered = await gacha.verify_collection(member, False)
+        if not registered:
+            await interaction.response.send_message(embed=discord.Embed(description=f'This user is not registered.', color=ErrorColour))
+            return
 
         await interaction.response.defer()
 
-        embed, file = await gacha.partyDisplay(member)
+        party = gacha.PartyObject(member)
+        await party.set_party()
+        await party.calculate_chemistry()
+
+        embed, file = await party.display()
         await interaction.followup.send(embed=embed, file=file)
     
 
     ###### ADD
-    @tree.command(
-            name = 'add',
-            description = 'Add a character to your party.',
-            guild = discord.Object(id=SERVER)
-    )
+    @party_group.command(description = 'Add a character to your party.')
     @app_commands.choices(slot=[
         app_commands.Choice(name='1', value=1), app_commands.Choice(name='2', value=2), app_commands.Choice(name='3', value=3),
         app_commands.Choice(name='4', value=4), app_commands.Choice(name='5', value=5), app_commands.Choice(name='6', value=6)
@@ -376,7 +422,10 @@ def run_discord_bot():
         
         await gacha.edit_slot(interaction.user, f'slot{slot.value}', character.id)
 
-        embed, file = await gacha.partyDisplay(interaction.user)
+        party = gacha.PartyObject(interaction.user)
+        await party.set_party()
+        await party.calculate_chemistry()
+        embed, file = await party.display()
 
         embed.description = f'Successfully added **{character.name}** to Slot **{slot.value}**!'
         embed.color = 0x36ec42
@@ -418,7 +467,7 @@ def run_discord_bot():
 
         embed: discord.Embed = await character.display(level, 0xb71010)
 
-        portrait = discord.File(f'Portraits/{character.id}.jpg', filename='portrait.jpg')
+        portrait = discord.File(f'Assets/Portraits/{character.id}.jpg', filename='portrait.jpg')
         embed.set_image(url=f'attachment://portrait.jpg')
 
         await interaction.response.send_message(embed=embed, file=portrait, view=CharInfo(interaction, character, level))
@@ -443,8 +492,11 @@ def run_discord_bot():
         )
         if card.tags:
             embed.set_footer(text=', '.join(card.tags).title())
+        if card.filename:
+            thumbnail = discord.File(fp=f"Assets/Cards/{card.filename}", filename=f'card.{card.filename.split(".")[-1]}')
+            embed.set_thumbnail(url=f"attachment://{thumbnail.filename}")
 
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, file=thumbnail)
 
     ##### STATUS
     @tree.command(
@@ -457,7 +509,7 @@ def run_discord_bot():
         starpower = await get_starpower(interaction.user)
         spins_left = await get_remaining_spins(interaction.user)
 
-        embed = discord.Embed(title=f'{interaction.user.display_name}\'s Status', description=f'Spins Left: **{spins_left}**.\nSpins refresh in {time_to_next_hour()}.\nStarpower: **{starpower}%**.\nRecharge Rate: **20%/h**.\nSummons Cost: **50%** Starpower.', color=0xd2ac41)
+        embed = discord.Embed(title=f'{interaction.user.display_name}\'s Status', description=f'Spins Left: **{spins_left}**.\nSpins refresh in {time_to_next_hour()}.\nStarpower: **{starpower}%**.\nRecharge Rate: **20%/h**.\nClaim Cost: **50%**.', color=0xd2ac41)
         embed.set_thumbnail(url=interaction.user.display_avatar)
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar)
 
@@ -566,7 +618,7 @@ def run_discord_bot():
         await interaction.response.send_message(embed=embed)
 
     
-    ##### WISH
+    ##### SIM
     @tree.command(
             name = 'simulate',
             description = 'Simulate X spins, default 1000. (ADMIN ONLY)',
@@ -602,7 +654,41 @@ def run_discord_bot():
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar)
 
         await interaction.followup.send(embed=embed)
+    
+
+    @tree.command(
+            name = 'test',
+            description = 'Test command',
+            guild = discord.Object(id=SERVER)
+    )
+    async def test(interaction: discord.Interaction):
+
+        test_party1 = [
+            battles.Character(CHARACTERS['AOT-10'], **FIGHTERS['AOT-10']), 
+            battles.Character(CHARACTERS['AOT-11'], **FIGHTERS['AOT-11']), 
+            battles.Character(CHARACTERS['AOT-14'], **FIGHTERS['AOT-14'])
+        ]
+        test_party2 = [
+            battles.Character(CHARACTERS['JJK-08'], **FIGHTERS['JJK-08']), 
+            battles.Character(CHARACTERS['JJK-12'], **FIGHTERS['JJK-12']), 
+            battles.Character(CHARACTERS['JJK-13'], **FIGHTERS['JJK-13'])
+        ]
+
+        player1 = battles.Player(interaction.user, interaction.channel)
+        player1.set_party(test_party1)
+        player2 = battles.Player(interaction.user, interaction.channel)
+        player2.set_party(test_party2)
+
+        battle = battles.Battle(player1, player2)
         
+        deck = [Cards.STRIKE] * 5 + [Cards.BLAST] * 5 + [Cards.BLOCK] * 5 + [Cards.BEAM] * 3 + [Cards.SLAM] * 3 + [Cards.PIERCE] * 3 + [Cards.FOCUS] * 3 + [Cards.EXPLOSION] * 3
+        await player1.zones.initialise_deck(deck)
+        await player2.zones.initialise_deck(deck)
+
+        await interaction.response.send_message("Created test battle")
+        await battle.start()
+        
+
 
     ########################################### LOOP ##########################################################
 
@@ -633,7 +719,11 @@ def run_discord_bot():
             daily.start()
 
         # Sync Commands
-        tree.add_command(info_group, guild=discord.Object(id=SERVER))
+        try:
+            tree.add_command(info_group, guild=discord.Object(id=SERVER))
+            tree.add_command(party_group, guild=discord.Object(id=SERVER))
+        except discord.ClientException:
+            pass
         await tree.sync(guild=discord.Object(id=SERVER))
 
         print(f"{client.user} is now running!")
@@ -814,11 +904,6 @@ async def refresh_spins():
 async def slot_choices() -> list[app_commands.Choice[str]]:
     return [app_commands.Choice(name=slot) for slot in [1,2,3,4,5,6]]
 
-async def autocomplete_collection(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-
-    collection = await gacha.get_collection(interaction.user, 'names')
-
-    return [app_commands.Choice(name=character, value=character) for character in collection if current.lower() in character.lower()]
 
 
 async def get_wish(member: discord.Member) -> str:
@@ -846,6 +931,12 @@ async def set_wish(member: discord.Member, wish: str) -> str:
             await cursor.execute(sql, val)
         await db.commit()
 
+async def insert_user_record(database: str, table: str, member: discord.Member):
+    async with aiosqlite.connect(f"{database}.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'INSERT INTO {table}(user_id) VALUES ({member.id})')
+        await db.commit()
+
 def to_progress_string(character: tuple) -> str:
     char: BaseChar = character[0]
     level = character[1]
@@ -861,6 +952,13 @@ async def autocomplete_series(interaction: discord.Interaction, current: str) ->
 
 async def autocomplete_character(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     chars = [app_commands.Choice(name=character, value=character) for character in CHARACTER_LIST if current.lower() in character.lower()]
+    if len(chars) > 25:
+        chars = chars[:25]
+    return chars
+
+async def autocomplete_collection(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    collection = await gacha.get_collection(interaction.user, 'names')
+    chars = [app_commands.Choice(name=character, value=character) for character in collection if current.lower() in character.lower()]
     if len(chars) > 25:
         chars = chars[:25]
     return chars

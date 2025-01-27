@@ -1,7 +1,7 @@
 import PIL, io
 import PIL.Image
-import discord, gacha, config
-from enum import Enum
+import discord, config
+from inspect import cleandoc
 
 class BaseChar():
 
@@ -19,7 +19,7 @@ class BaseChar():
 
     async def display(self, level: float, colour: int, is_new: bool = False) -> discord.Embed:
 
-        emoji = gacha.shining_emoji if self.rarity == 3 else gacha.glowing_emoji if self.rarity == 2 else gacha.common_emoji
+        emoji = config.RARITY_EMOJI_KEY[self.rarity]
 
         if level >= 5:
             info = '(Max Level)'
@@ -68,13 +68,18 @@ class CharInfo(discord.ui.View):
         stats = apply_growth(stats, growth_style, growth_factor)
 
         text = f"**HP:** {stats['health']} | **Spe**: {stats['speed']}\n**Atk:** {stats['attack']} | **Def:** {stats['defense']}\n**M.A:** {stats['magic_attack']} | **M.D:** {stats['magic_defense']}"
-        text += f"\n\n**(Passive) {character['passive_ability'].name}**\n>>> {character['passive_ability'].__doc__}"
+        text += f"\n\n**(Passive) {character['passive_ability'].name}**\n{character['passive_ability'].display()}"
+        text += f"\n\n**(Active) {character['active_ability'].name}**\n{character['active_ability'].display()}"
+        tags = [f"**{x}**🧬" for x in character['chemistry_tags']] + character['tags']
+        if tags:
+            text +=f"\n\n*Tags: {', '.join(tags)}*"
 
-        embed = discord.Embed(title=f"{COLOUR_EMOJI_KEY[attribute]} {self.base_char.name}", description = text, color=config.CHARACTER_EMBED_COLOUR)
+        embed = discord.Embed(title=f"{config.COLOUR_EMOJI_KEY[attribute]} {self.base_char.name}", description = text, color=config.CHARACTER_EMBED_COLOUR)
         thumbnail = get_party_image(self.base_char.id, self.level)
         embed.set_thumbnail(url=f'attachment://{thumbnail.filename}')
+        embed.set_footer(text=self.base_char.series)
 
-        await interaction.response.edit_message(embed=embed, view=self, attachments=[thumbnail])
+        await interaction.response.edit_message(embed=embed, view=None, attachments=[thumbnail])
     
 CHARACTERS = {
 
@@ -282,7 +287,10 @@ def apply_growth(stats: dict, growth_style: str, growth_factor: int) -> dict:
 
 
 def get_party_image(character_id: str, level: int) -> discord.File:
-    base: PIL.Image.Image = PIL.Image.open(f'Party/{character_id}.png')
+    try:
+        base: PIL.Image.Image = PIL.Image.open(f'Party/{character_id}.png')
+    except FileNotFoundError:
+        base = PIL.Image.open(f"Assets/missing_asset.png")
     stars = PIL.Image.open(f'Assets/Level {level if level in [1,2,3,4,5] else 1}.png')
 
     base.paste(stars, (0, 0), stars)
@@ -294,4 +302,3 @@ def get_party_image(character_id: str, level: int) -> discord.File:
         return discord.File(fp=image_binary, filename='party.jpeg')
 
 from battles.characters import FIGHTERS
-from battles.battles import COLOUR_EMOJI_KEY

@@ -12,6 +12,7 @@ class BaseStatus():
     name: str
     duration: int = field(default=999, kw_only=True)
     duration_type: str = field(default='rounds', kw_only=True)
+    display_emoji: str = field(default=None, kw_only=True)
     user: battles.Character = field(default=None, init=False)
 
     def copy(self):
@@ -45,7 +46,8 @@ class BaseStatus():
 @dataclass
 class Trapped(BaseStatus):
     """Prevents the user from switching out."""
-    name: str = "Trapped"
+    name: str = field(default='Trapped', init=False)
+    display_emoji: str = field(default='🔒', init=False)
 
 @dataclass
 class NegateAttributeDisadvantage(BaseStatus):
@@ -68,18 +70,17 @@ class StatusImmunity(BaseStatus):
 
 # Buffs
 @dataclass
-class DamageInflictedBuff():
+class DamageInflictedBuff(BaseStatus):
     """Basic damage buff.
     
     Args:
         multiplier (float): Bonus percentage to damage inflicted.
         duration (int): Duration of the buff.
-        duration_type (str): Units of duration. Default is 'rounds', can also be 'turns'.
+        duration_type (str): Units of duration. Default is 'rounds', can also be 'turns' or 'cards'.
     """
     multiplier: float
-    duration: int = field(default=999, kw_only=True)
-    duration_type: str = field(default='rounds', kw_only=True)
     name: str = field(default='Damage Inflicted', init=False)
+    display_emoji: str = field(default='💪', init=False)
 
     async def applicable_to_card(self, card: battles.BaseCard):
         """Interface method for checking if the buff applies to a card."""
@@ -100,3 +101,21 @@ class TagSpecificDamageInflicted(DamageInflictedBuff):
     async def applicable_to_card(self, card: battles.BaseCard):
         """Returns True if the card has the specified tag."""
         return self.condition_tag in card.tags
+
+# Buffs
+@dataclass
+class DamageReceivedBuff(BaseStatus):
+    """Basic damage received buff.
+    
+    Args:
+        multiplier (float): Bonus percentage to damage received.
+        duration (int): Duration of the buff.
+        duration_type (str): Units of duration. Default is 'rounds', can also be 'turns' or 'cards'.
+    """
+    multiplier: float
+    name: str = field(default='Damage Inflicted', init=False)
+    display_emoji: str = field(default='🦾', init=False)
+
+    async def applicable_to_card(self, card: battles.BaseCard):
+        """Interface method for checking if the buff applies to a card."""
+        return True
