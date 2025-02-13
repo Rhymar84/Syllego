@@ -1,6 +1,7 @@
 import discord
 import sqlite3
 import random
+import config
 import system.gacha as gacha
 import battles.battles as battles
 import datetime as dt
@@ -15,7 +16,7 @@ from difflib import get_close_matches
 from config import TOKEN, BOT_ID, ErrorColour
 from config import SERVER
 from config import DEBUG
-from character_database import CHARACTERS, BaseChar, CharInfo
+from system.character_database import CHARACTERS, BaseChar, CharInfo
 from battles.cards import Cards, BaseCard, create_card
 from battles.characters import FIGHTERS
 
@@ -360,7 +361,7 @@ def run_discord_bot():
             embed = discord.Embed(title='No Spins Left :(', description=f'You do not have any spins left! Spins refresh in {time_to_next_hour()}.', color=ErrorColour)
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-
+        
         await gacha.verify_collection(interaction.user)
 
         pull: BaseChar = await gacha.do_spin(interaction.user)
@@ -482,18 +483,24 @@ def run_discord_bot():
             return
         
         await interaction.response.defer()
-        card: BaseCard = Cards[card.upper().replace(' ', '_')].value
+        card_id = card.upper().replace(' ', '_').translate({ord(i): None for i in ':;.,!@#$%^&*()[]{}<>?/\\'})
+        card: BaseCard = Cards[card_id].value
 
         card_description = await card.info_text()
         embed = discord.Embed(
-            title = f"{card.name.title()} ({card.cost})",
+            title = f"{config.CARD_RARITY_KEY[card.rarity]} {card.name.title()} ({card.cost})",
             description = card_description,
             color = 0xfcba03
         )
         if card.tags:
             embed.set_footer(text=', '.join(card.tags).title())
+
+        thumbnail = None
         if card.filename:
-            thumbnail = discord.File(fp=f"Assets/Cards/{card.filename}", filename=f'card.{card.filename.split(".")[-1]}')
+            try:
+                thumbnail = discord.File(fp=f"Assets/Cards/{card.filename}", filename=f'card.{card.filename.split(".")[-1]}')
+            except FileNotFoundError:
+                pass
             embed.set_thumbnail(url=f"attachment://{thumbnail.filename}")
 
         await interaction.followup.send(embed=embed, file=thumbnail)
@@ -662,11 +669,13 @@ def run_discord_bot():
             guild = discord.Object(id=SERVER)
     )
     async def test(interaction: discord.Interaction):
+        for thread in interaction.channel.threads:
+            await thread.delete(reason='Clearing test threads.')
 
         test_party1 = [
             battles.Character(CHARACTERS['AOT-10'], **FIGHTERS['AOT-10']), 
             battles.Character(CHARACTERS['AOT-11'], **FIGHTERS['AOT-11']), 
-            battles.Character(CHARACTERS['AOT-14'], **FIGHTERS['AOT-14'])
+            battles.Character(CHARACTERS['HXH-08'], **FIGHTERS['HXH-08'])
         ]
         test_party2 = [
             battles.Character(CHARACTERS['JJK-08'], **FIGHTERS['JJK-08']), 
@@ -674,6 +683,7 @@ def run_discord_bot():
             battles.Character(CHARACTERS['JJK-13'], **FIGHTERS['JJK-13'])
         ]
 
+        
         player1 = battles.Player(interaction.user, interaction.channel)
         player1.set_party(test_party1)
         player2 = battles.Player(interaction.user, interaction.channel)
@@ -681,7 +691,7 @@ def run_discord_bot():
 
         battle = battles.Battle(player1, player2)
         
-        deck = [Cards.STRIKE] * 5 + [Cards.BLAST] * 5 + [Cards.BLOCK] * 5 + [Cards.BEAM] * 3 + [Cards.SLAM] * 3 + [Cards.PIERCE] * 3 + [Cards.FOCUS] * 3 + [Cards.EXPLOSION] * 3
+        deck = [Cards.STRIKE] * 5 + [Cards.BLAST] * 5 + [Cards.BLOCK] * 5 + [Cards.SCRYING_TOME] * 3 + [Cards.SLAM] * 3 + [Cards.PIERCE] * 3 + [Cards.FOCUS] * 3 + [Cards.EXPLOSION] * 3
         await player1.zones.initialise_deck(deck)
         await player2.zones.initialise_deck(deck)
 
@@ -708,7 +718,7 @@ def run_discord_bot():
     ########################################### ON READY ##########################################################
     @client.event
     async def on_ready():
-
+        
         guild0 = client.get_guild(SERVER)
         rhymar = guild0.get_member(209985174081896450)
 
@@ -722,7 +732,7 @@ def run_discord_bot():
         try:
             tree.add_command(info_group, guild=discord.Object(id=SERVER))
             tree.add_command(party_group, guild=discord.Object(id=SERVER))
-        except discord.ClientException:
+        except discord.app_commands.errors.CommandAlreadyRegistered:
             pass
         await tree.sync(guild=discord.Object(id=SERVER))
 

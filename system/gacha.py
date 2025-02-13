@@ -6,7 +6,7 @@ import math
 import datetime as dt
 import asyncio
 import aiosqlite
-from character_database import CHARACTERS, BaseChar
+from system.character_database import CHARACTERS, BaseChar, get_party_image
 from battles.characters import FIGHTERS
 from time import perf_counter
 from PIL import Image
@@ -60,11 +60,14 @@ class Spin(discord.ui.View):
 
     @discord.ui.button(emoji='<:claim:1149647515063439380>', style=discord.ButtonStyle.grey)
     async def summon_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-
+        if self.is_finished():
+            await interaction.response.defer()
+            return
         if interaction.user != self.original_interaction.user:
             embed = discord.Embed(title='Error', description='This is not your spin!', color=ErrorColour)
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
+        
         
         starpower = await bot.get_starpower(interaction.user)
         
@@ -93,6 +96,7 @@ class Spin(discord.ui.View):
             self.remove_item(self.summon_button)
             self.add_item(TakeJarButton(self.original_interaction, self.character, self.character_level))
 
+
         embed = await self.character.display(self.character_level, get_rarity_colour(self.character.rarity))
 
         portrait = discord.File(f'Assets/Portraits/{self.character.id}.jpg', filename='portrait.jpg')
@@ -101,11 +105,18 @@ class Spin(discord.ui.View):
         
         remaining_spins = await bot.get_remaining_spins(self.original_interaction.user)
         await bot.set_remaining_spins(self.original_interaction.user, remaining_spins - 1)
-        await self.original_interaction.response.send_message(embed=embed, file=portrait, view=self)
+        try:
+            await self.original_interaction.response.send_message(embed=embed, file=portrait, view=self)
+        except Exception as e:
+            remaining_spins = await bot.get_remaining_spins(self.original_interaction.user)
+            await bot.set_remaining_spins(self.original_interaction.user, remaining_spins + 1)
+            raise e
 
 
 
     async def claim(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        self.stop()
 
         embed = await self.character.display(self.character_level, 0xb71010, self.is_new)
 
@@ -113,7 +124,7 @@ class Spin(discord.ui.View):
         embed.set_image(url=f'attachment://portrait.jpg')
         embed.set_author(name=f'{interaction.user.display_name}', icon_url=f'{interaction.user.display_avatar}')
 
-        await interaction.response.edit_message(embed=embed, attachments=[portrait], view=None)
+        await interaction.edit_original_response(embed=embed, attachments=[portrait], view=None)
 
         channel = interaction.channel
         await channel.send(f'**{interaction.user.display_name}** made an offering to the stars, and was gifted **{self.character.name}**.')
@@ -205,11 +216,7 @@ class PartyObject():
 
         for character in self.party:
             
-            try:
-                char = Image.open(f"Assets/Party/{character['character'].id}.png")
-            except FileNotFoundError:
-                char = Image.open(f"Assets/missing_asset.png")
-
+            char = get_party_image(character['character'], character['level'], False)
             level = Image.open(f"Assets/Level {character['level']}.png")
 
             base.paste(char, (character['pos']))
@@ -316,18 +323,17 @@ async def verify_collection(member: discord.Member, insert_if_missing: bool = Tr
 async def do_spin(member: discord.Member):
     
 
-    shining_chance = 2
-    glowing_chance = 10
-    
     # 10% chance to guarantee a character from wished series 
     wish = await bot.get_wish(member)
     if wish is not None:
-        wish_chance = 10
-        wish_roll = random.randint(1, 100)
+        wish_chance = 0.1
+        wish_roll = random.random()
         if wish_roll > wish_chance:
             wish = None
 
-    roll = random.randint(1, 100)
+    shining_chance = 0.02
+    glowing_chance = 0.1
+    roll = random.random()
 
     if roll <= shining_chance:
         rarity = 3
@@ -495,8 +501,10 @@ async def clearParty(member: discord.Member):
 
 
 
-def get_pool(rarity: int, series: str):
+def get_pool(rarity: int, series: str | None) -> list[BaseChar]:
     pool = [character for character in CHARACTERS.values() if character.rarity == rarity]
+    if series:
+        pool = [character for character in pool if character.series == series]
     return pool
 
 async def get_jars(member: discord.Member, insert_if_none: bool=False):

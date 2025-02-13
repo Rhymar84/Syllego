@@ -128,7 +128,7 @@ FIGHTERS = {
         "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
     },
     "RZ-15": {
-        "passive_ability": None, "active_ability": None, "attribute": "yellow", "chemistry_tags": [], "tags": [],
+        "passive_ability": None, "active_ability": None, "attribute": "yellow", "chemistry_tags": [], "tags": ["Assassin"],
         "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
     },
     "RZ-16": {
@@ -246,8 +246,8 @@ FIGHTERS = {
         "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
     },
     "JJK-11": {
-        "passive_ability": None, "active_ability": None, "attribute": "red", "chemistry_tags": [], "tags": [],
-        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+        "passive_ability": passives.NanamiPassive, "active_ability": actives.NanamiActive, "attribute": "red", "chemistry_tags": [], "tags": [],
+        "health": 440, "attack": 100, "defense": 100, "magic_attack": 50, "magic_defense": 80, "speed": 97, "growth_style": "balanced"
     },
     "JJK-12": {
         "passive_ability": passives.MusterEnergy, "active_ability": actives.InumakiActive, "attribute": "yellow", "chemistry_tags": [], "tags": [],
@@ -457,5 +457,72 @@ FIGHTERS = {
         "passive_ability": None, "active_ability": None, "attribute": "black", "chemistry_tags": [], "tags": [],
         "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
     },
+
+    # Hunter x Hunter
+    "HXH-01": {
+        "passive_ability": passives.GonPassive, "active_ability": actives.GonActive, "attribute": "green", "chemistry_tags": [], "tags": [],
+        "health": 470, "attack": 115, "defense": 100, "magic_attack": 60, "magic_defense": 95, "speed": 98, "growth_style": "balanced"
+    },
+    "HXH-02" : {
+        "passive_ability": None, "active_ability": None, "attribute": "blue", "chemistry_tags": [], "tags": ["Assassin"],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-03" : {
+        "passive_ability": None, "active_ability": None, "attribute": "orange", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-04" : {
+        "passive_ability": None, "active_ability": None, "attribute": "red", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-05" : {
+        "passive_ability": None, "active_ability": None, "attribute": "yellow", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-06" : {
+        "passive_ability": None, "active_ability": None, "attribute": "blue", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-07" : {
+        "passive_ability": None, "active_ability": None, "attribute": "green", "chemistry_tags": ["Chimera Ant"], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-08" : {
+        "passive_ability": passives.PitouPassive, "active_ability": actives.DoctorBlythe, "attribute": "yellow", "chemistry_tags": ["Chimera Ant"], "tags": [],
+        "health": 465, "attack": 100, "defense": 90, "magic_attack": 50, "magic_defense": 90, "speed": 87, "growth_style": "balanced"
+    },
+    "HXH-09" : {
+        "passive_ability": None, "active_ability": None, "attribute": "orange", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-10" : {
+        "passive_ability": None, "active_ability": None, "attribute": "blue", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-11" : {
+        "passive_ability": None, "active_ability": None, "attribute": "yellow", "chemistry_tags": ["Morel School"], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-12" : {
+        "passive_ability": None, "active_ability": None, "attribute": "blue", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-13" : {
+        "passive_ability": None, "active_ability": None, "attribute": "orange", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-14" : {
+        "passive_ability": None, "active_ability": None, "attribute": "red", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-15" : {
+        "passive_ability": None, "active_ability": None, "attribute": "green", "chemistry_tags": ["Morel School"], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    "HXH-16" : {
+        "passive_ability": None, "active_ability": None, "attribute": "red", "chemistry_tags": [], "tags": [],
+        "health": 0, "attack": 0, "defense": 0, "magic_attack": 0, "magic_defense": 0, "speed": 0, "growth_style": "balanced"
+    },
+    
 
 }
