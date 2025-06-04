@@ -11,6 +11,7 @@ DEBUG = 1148842953733853184
 ErrorColour = 0xe73232
 StarShopColour = 0xfacf42
 CHARACTER_EMBED_COLOUR = 0xb71010
+INVENTORY_COLOUR = 0x03d3fc
 
 
 # Keys
@@ -38,11 +39,11 @@ BUFF_STAT_KEY = {
     'spd': 'Speed'
 }
 COLOUR_EMOJI_KEY = {
-    'red': '🔴',
-    'blue': '🔵',
-    'green': '🟢',
-    'yellow': '🟡',
-    'orange': '🟠'
+    'red': '<:red:1340777064214822954>',
+    'blue': '<:blue:1340777059743567992>',
+    'green': '<:green:1340777061232545864>',
+    'yellow': '<:yellow:1340777065590292530>',
+    'orange': '<:orange:1340777062553747456>'
 }
 SWITCH_CD_KEY = {
     10: '🕑',

@@ -3,10 +3,12 @@ import sqlite3
 import random
 import config
 import system.gacha as gacha
+import system.farming as farming
 import battles.battles as battles
 import datetime as dt
 import aiosqlite
 import math
+import heapq
 from time import perf_counter
 from discord.ext import tasks
 from discord import app_commands
@@ -17,6 +19,8 @@ from config import TOKEN, BOT_ID, ErrorColour
 from config import SERVER
 from config import DEBUG
 from system.character_database import CHARACTERS, BaseChar, CharInfo
+from system.items import ITEMS
+from system.recipes import RECIPES
 from battles.cards import Cards, BaseCard, create_card
 from battles.characters import FIGHTERS
 
@@ -170,8 +174,31 @@ class Book(discord.ui.View):
                 await self.original_interaction.response.send_message(embed=self.pages[0], view=self)
 
 
+    async def edit_create(self):
+
+        if self.file_names:
+            embed = self.pages[0]
+
+            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
+            embed.set_image(url=f'attachment://portrait.jpg')
+
+            if len(self.pages) == 1:
+                await self.original_interaction.response.edit_message(embed=embed, attachments=[portrait], view=None)
+            else:
+                await self.original_interaction.response.edit_message(embed=embed, attachments=[portrait], view=self)
+                
+        else:
+            if len(self.pages) == 1:
+                await self.original_interaction.response.edit_message(embed=self.pages[0], view=None)
+            else:
+                await self.original_interaction.response.edit_message(embed=self.pages[0], view=self)
+
+
 info_group = app_commands.Group(name="info", description="Check information on various battle mechanics.")
 party_group = app_commands.Group(name="party", description="Commands relating to your battle party.")
+item_group = app_commands.Group(name='item', description='Commands relating to items.')
+farming_group = app_commands.Group(name='farming', description='Commands relating to AIO Farming Unit.')
+refinery_group = app_commands.Group(name='refinery', description='Commands relating to Refinery.')
 
 
 def run_discord_bot():
@@ -312,7 +339,7 @@ def run_discord_bot():
         if member == interaction.user:
             await gacha.verify_collection(member)
         else:
-            if await gacha.verify_collection(member, False):
+            if not await gacha.verify_collection(member, False):
                 await interaction.response.send_message(embed=discord.Embed(description='This user is not registered.', color=ErrorColour))
                 return
         
@@ -355,7 +382,7 @@ def run_discord_bot():
     )
     async def spin(interaction: discord.Interaction):
 
-        remaining_spins = await get_remaining_spins(interaction.user)
+        remaining_spins = await gacha.get_remaining_spins(interaction.user)
 
         if remaining_spins < 1:
             embed = discord.Embed(title='No Spins Left :(', description=f'You do not have any spins left! Spins refresh in {time_to_next_hour()}.', color=ErrorColour)
@@ -440,11 +467,7 @@ def run_discord_bot():
 
 
     ###### CHARACTER
-    @tree.command(
-            name = 'character',
-            description = 'View a character\'s information. (Entered name does not need to be exact)',
-            guild = discord.Object(id=SERVER)
-    )
+    @info_group.command(description = 'View a character\'s information. (Entered name does not need to be exact)')
     @app_commands.autocomplete(character=autocomplete_character)
     async def character(interaction: discord.Interaction, character: str):
         
@@ -513,8 +536,8 @@ def run_discord_bot():
     )
     async def status(interaction: discord.Interaction):
 
-        starpower = await get_starpower(interaction.user)
-        spins_left = await get_remaining_spins(interaction.user)
+        starpower = await gacha.get_starpower(interaction.user)
+        spins_left = await gacha.get_remaining_spins(interaction.user)
 
         embed = discord.Embed(title=f'{interaction.user.display_name}\'s Status', description=f'Spins Left: **{spins_left}**.\nSpins refresh in {time_to_next_hour()}.\nStarpower: **{starpower}%**.\nRecharge Rate: **20%/h**.\nClaim Cost: **50%**.', color=0xd2ac41)
         embed.set_thumbnail(url=interaction.user.display_avatar)
@@ -541,7 +564,7 @@ def run_discord_bot():
         ids = tuple(CHARACTERS.keys())
         missing = []
 
-        db = sqlite3.connect('gacha.sqlite')
+        db = sqlite3.connect('databases/gacha.sqlite')
         cursor = db.cursor()
 
         cursor.execute('PRAGMA table_info(collection)')
@@ -560,7 +583,7 @@ def run_discord_bot():
             await interaction.followup.send('No missing characters :D')
             return
         
-        db = sqlite3.connect('gacha.sqlite')
+        db = sqlite3.connect('databases/gacha.sqlite')
         cursor = db.cursor()
 
         for character in missing:
@@ -582,7 +605,7 @@ def run_discord_bot():
     )
     async def wishinfo(interaction: discord.Interaction):
 
-        wish = await get_wish(interaction.user)
+        wish = await gacha.get_wish(interaction.user)
 
         if wish is None:
             info_text = 'You are not currently wishing for a series.'
@@ -612,7 +635,7 @@ def run_discord_bot():
         if series.lower() == 'none':
             series = None
 
-        await set_wish(interaction.user, series)
+        await gacha.set_wish(interaction.user, series)
 
         if series is None:
             description = 'Successfully cleared your wished series.'
@@ -664,6 +687,219 @@ def run_discord_bot():
     
 
     @tree.command(
+            name = 'binder',
+            description = 'View your card binder.',
+            guild = discord.Object(id=SERVER)
+    )
+    @app_commands.choices(sort=[app_commands.Choice(name='rarity', value='rarity'), app_commands.Choice(name='alphabetical', value='alphabetical'), app_commands.Choice(name='copies', value='copies')])
+    async def binder(interaction: discord.Interaction, sort: app_commands.Choice[str]=None, member: discord.Member=None):
+        member = member if member is not None else interaction.user
+
+        if not await gacha.verify_collection(interaction.user, False):
+            await interaction.response.send_message(embed=discord.Embed(description=f'{member.mention} is not registered.', color=ErrorColour))
+            return
+        
+        binder = await gacha.get_binder(member, sort.value if sort else 'rarity')
+        if not binder:
+            await interaction.response.send_message(embed=discord.Embed(title = f"{member.display_name}'s Binder", description=f'This binder is empty.', color=0xfcba03))
+            return
+        
+        binder = [f"- {count}x {config.CARD_RARITY_KEY[Cards[id].value.rarity]} **{Cards[id].value.name}**" for id, count in binder.items()]
+        cards_collected = len(binder)
+
+        embeds: list[discord.Embed] = []
+        while binder:
+            page = binder[:15]
+            
+            embed = discord.Embed(
+                title=f"{member.display_name}'s Binder - {cards_collected}/{len([x for x in Cards if x.value.rarity not in ['imaginary', 'basic']])}", 
+                description='\n'.join(page), 
+                color=0xfcba03
+            )
+            embed.set_author(name=member.display_name, icon_url=member.display_avatar)
+            embeds.append(embed)
+
+            binder = binder[16:]
+
+        if len(embeds) > 1:
+            for index, embed in enumerate(embeds):
+                embed.set_footer(text=f'\n({index+1}/{len(embeds)})')
+        
+        collection = Book(interaction, embeds)
+        await collection.create()
+
+        
+
+
+    @item_group.command(description='View your item inventory.')
+    async def inventory(interaction: discord.Interaction):
+        if not await gacha.verify_collection(interaction.user, False):
+            await interaction.response.send_message(embed=discord.Embed(description='You are not registered.', color=ErrorColour))
+            return
+
+        inventory = await gacha.get_inventory(interaction.user)
+        if not inventory:
+            await interaction.response.send_message(embed=discord.Embed(description='Your inventory is empty.', color=config.INVENTORY_COLOUR))
+            return
+
+        inventory = [f"{count}x **{ITEMS[id]['name']}**" for id, count in inventory.items()]
+        inventory.sort(key=lambda x: int(x.split('x')[0]), reverse=True)
+        inventory = [f"- {x}" for x in inventory]
+
+        embeds: list[discord.Embed] = []
+        while inventory:
+            page = inventory[:15]
+            
+            embed = discord.Embed(title='', description='\n'.join(page), color=config.INVENTORY_COLOUR)
+            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar)
+            embeds.append(embed)
+
+            inventory = inventory[16:]
+        
+        if len(embeds) > 1:
+            for index, embed in enumerate(embeds):
+                embed.set_footer(text=f'\n({index+1}/{len(embeds)})')
+            
+        collection = Book(interaction, embeds)
+        await collection.create()
+
+    @info_group.command(description='View information about an item.')
+    @app_commands.autocomplete(item=autocomplete_item)
+    async def item(interaction: discord.Interaction, item: str):
+        if not await gacha.verify_collection(interaction.user, False):
+            await interaction.response.send_message(embed=discord.Embed(description='You are not registered.', color=ErrorColour), ephemeral=True)
+            return
+        if item not in ITEMS.keys():
+            await interaction.response.send_message(embed=discord.Embed(description='Could not find item.', color=ErrorColour), ephemeral=True)
+            return
+        
+        obtaining = await gacha.get_item_obtaining_string(item)
+        item_recipes = await farming.get_recipes(item)
+        item = ITEMS[item]
+        
+        await interaction.response.defer()
+        embed = discord.Embed(title=item["name"], description=f"{item['description']}{obtaining}", color=0xfcba03)
+
+        if item_recipes:
+            view = discord.ui.View()
+            view.add_item(farming.ViewRecipesButton(interaction.user, item_recipes))
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.followup.send(embed=embed)
+
+
+    @item_group.command(description='Redeem an item.')
+    @app_commands.autocomplete(item=autocomplete_inventory)
+    async def redeem(interaction: discord.Interaction, item: str):
+        if not await gacha.verify_collection(interaction.user, False):
+            await interaction.response.send_message(embed=discord.Embed(description='You are not registered.', color=ErrorColour), ephemeral=True)
+            return
+        if item not in ITEMS.keys():
+            await interaction.response.send_message(embed=discord.Embed(description='Could not find item.', color=ErrorColour), ephemeral=True)
+            return
+        redeem: dict = ITEMS[item].get('redeem')
+        if not redeem:
+            await interaction.response.send_message(embed=discord.Embed(description='This item cannot be redeemed.', color=ErrorColour), ephemeral=True)
+            return
+        inventory = await gacha.get_inventory(interaction.user)
+        if item not in inventory.keys():
+            await interaction.response.send_message(embed=discord.Embed(description='You do not own this item.', color=ErrorColour), ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+        embed = await gacha.redeem_item(interaction.user, item)
+        await interaction.followup.send(embed=embed)
+
+
+    @farming_group.command(description='Check your AIOFU\'s progress.')
+    async def view(interaction: discord.Interaction):
+        if not await gacha.verify_collection(interaction.user, False):
+            await interaction.response.send_message(embed=discord.Embed(description='You are not registered.', color=ErrorColour), ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+
+
+        embed, view = await farming.get_aiofu_embed(interaction.user)
+        if view:
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.followup.send(embed=embed)
+
+
+    @farming_group.command(description='Start processing using an available AIOFU slot!')
+    @app_commands.autocomplete(item=autocomplete_inventory_farming)
+    @app_commands.choices(mode=[
+        app_commands.Choice(name='🚜 Grow 🚜', value=1), app_commands.Choice(name='🐄 Harvest 🐄', value=2), app_commands.Choice(name='⛏️ Extract ⛏️', value=3)
+    ])
+    async def start(interaction: discord.Interaction, item: str, mode: app_commands.Choice[int]):
+        if not await gacha.verify_collection(interaction.user, False):
+            await interaction.response.send_message(embed=discord.Embed(description='You are not registered.', color=ErrorColour), ephemeral=True)
+            return
+        if await farming.check_farming_errors(interaction, item, mode.value):
+            return
+        
+        await interaction.response.defer()
+
+        await farming.start_farming(interaction.user, item, mode.value)
+
+
+        embed, view = await farming.get_aiofu_embed(interaction.user)
+        embed.description += f"🪓 **{ITEMS[item]['name']}** is now being {'grown' if mode.value == 1 else ('harvested' if mode.value == 2 else 'extracted')}! ⏰"
+
+        await interaction.followup.send(embed=embed)
+
+    @refinery_group.command(description='Check your Refinery\'s progress.')
+    async def view(interaction: discord.Interaction):
+        if not await gacha.verify_collection(interaction.user, False):
+            await interaction.response.send_message(embed=discord.Embed(description='You are not registered.', color=ErrorColour), ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+
+
+        embed, view = await farming.get_refinery_embed(interaction.user)
+        if view:
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.followup.send(embed=embed)
+
+    @refinery_group.command(description='Start refining a recipe using an available Refinery slot!')
+    @app_commands.autocomplete(recipe=autocomplete_recipe)
+    @app_commands.choices(mode=[
+        app_commands.Choice(name=farming.REFINERY_MODE_NAMES["basic"], value=1), app_commands.Choice(name=farming.REFINERY_MODE_NAMES["fire"], value=2), app_commands.Choice(name=farming.REFINERY_MODE_NAMES["water"], value=3),
+        app_commands.Choice(name=farming.REFINERY_MODE_NAMES["wind"], value=4), app_commands.Choice(name=farming.REFINERY_MODE_NAMES["earth"], value=5)
+    ])
+    async def start(interaction: discord.Interaction, recipe: str, mode: app_commands.Choice[int]):
+        if not await gacha.verify_collection(interaction.user, False):
+            await interaction.response.send_message(embed=discord.Embed(description='You are not registered.', color=ErrorColour), ephemeral=True)
+            return
+        
+        possible_recipies = [k for k,v in RECIPES.items() if v["name"] == recipe]
+        if not possible_recipies:
+            await interaction.response.send_message(embed=discord.Embed(description=f'Could not find recipe "{recipe}".', color=ErrorColour), ephemeral=True)
+            return
+        
+        if len(possible_recipies) > 1:
+            # Make recipe selection view
+            ...
+            return
+        
+        recipe_id = possible_recipies[0]
+        if await farming.check_refining_errors(interaction, recipe_id, mode.value):
+            return
+            
+        await interaction.response.defer()
+
+        await farming.start_refining(interaction.user, recipe_id, mode.value)
+
+        embed, view = await farming.get_refinery_embed(interaction.user)
+        embed.description += f"{farming.REFINERY_MODE_EMOJIS[farming.REFINING_MODES[mode.value]]} **{recipe}** is now being refined! ⏰"
+
+        await interaction.followup.send(embed=embed)
+
+
+    @tree.command(
             name = 'test',
             description = 'Test command',
             guild = discord.Object(id=SERVER)
@@ -697,21 +933,37 @@ def run_discord_bot():
 
         await interaction.response.send_message("Created test battle")
         await battle.start()
+
+
         
 
 
     ########################################### LOOP ##########################################################
 
+    # Spin refresh
     @tasks.loop(seconds=1)
     async def daily():
         now = dt.datetime.now()
 
-        with open ("last_refresh.txt", "r") as file:
+        with open ("databases/last_refresh.txt", "r") as file:
             line = file.readline()
 
 
         if now.hour != int(line):
             await refresh_spins()
+
+
+    # Notifications
+    @tasks.loop(minutes=1)
+    async def notifications():
+
+        now = dt.datetime.now()
+
+        while farming.farming_notifications and farming.farming_notifications[0][0] <= now:
+            _, user = heapq.heappop(farming.farming_notifications)
+            settings = await gacha.get_settings(user)
+            if settings["farming_dms"]:
+                await farming.send_aiofu_notification(user)
 
 
 
@@ -727,11 +979,16 @@ def run_discord_bot():
 
         if not daily.is_running():
             daily.start()
+        if not notifications.is_running():
+            notifications.start()
 
         # Sync Commands
         try:
             tree.add_command(info_group, guild=discord.Object(id=SERVER))
             tree.add_command(party_group, guild=discord.Object(id=SERVER))
+            tree.add_command(item_group, guild=discord.Object(id=SERVER))
+            tree.add_command(farming_group, guild=discord.Object(id=SERVER))
+            tree.add_command(refinery_group, guild=discord.Object(id=SERVER))
         except discord.app_commands.errors.CommandAlreadyRegistered:
             pass
         await tree.sync(guild=discord.Object(id=SERVER))
@@ -775,114 +1032,6 @@ async def log(log: str, admin: int):
 
 
 
-async def check_last_starpower_update(member: discord.Member) -> dt.datetime:
-
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
-
-    cursor.execute(f'SELECT last_starpower_update FROM misc WHERE user_id = {member.id}')
-    last_update = cursor.fetchone()[0]
-
-    cursor.close()
-    db.close()
-
-    if not last_update:
-        last_update = '24-09-2003 00:00'
-
-    return dt.datetime.strptime(last_update, "%d-%m-%Y %H:%M")
-
-async def set_last_starpower_update(member: discord.Member, time: dt.datetime):
-
-    db = sqlite3.connect('gacha.sqlite')
-    cursor = db.cursor()
-
-    sql = (f'UPDATE misc SET last_starpower_update = ? WHERE user_id = ?')
-    val = (time.strftime("%d-%m-%Y %H:%M"), member.id)
-    cursor.execute(sql, val)
-
-    db.commit()
-    cursor.close()
-    db.close()
-
-
-async def set_starpower(member: discord.Member, amount: int):
-
-    async with aiosqlite.connect("gacha.sqlite") as db:
-        async with db.cursor() as cursor:
-            sql = (f'UPDATE misc SET starpower = ? WHERE user_id = ?')
-            val = (amount, member.id)
-            await cursor.execute(sql, val)
-
-        await db.commit()
-
-
-
-async def get_starpower(member: discord.Member) -> int:
-
-    async with aiosqlite.connect("gacha.sqlite") as db:
-        async with db.cursor() as cursor:
-            await cursor.execute(f'SELECT starpower FROM misc WHERE user_id = {member.id}')
-            starpower = await cursor.fetchone()
-
-    starpower = starpower[0]
-
-    if not starpower:
-        starpower = 0
-
-
-    last_update = await check_last_starpower_update(member)
-    now = dt.datetime.now()
-    difference = now - last_update
-    seconds = difference.total_seconds()
-
-    if starpower >= 100 or starpower is None:
-        return 100
-    
-    if seconds < 180:
-        return starpower
-
-    
-    missing_starpower = 100 - starpower
-    recharged_starpower = int(seconds / 180)
-
-    leftover = seconds - (180 * recharged_starpower)
-    leftover = dt.timedelta(seconds=leftover)
-
-
-    await set_last_starpower_update(member, now-leftover)
-
-    if recharged_starpower > missing_starpower:
-        recharged_starpower = missing_starpower
-
-    await set_starpower(member, starpower + recharged_starpower)
-    
-    return starpower + recharged_starpower
-
-
-async def get_remaining_spins(member: discord.Member) -> int:
-
-    async with aiosqlite.connect("gacha.sqlite") as db:
-        async with db.cursor() as cursor:
-            await cursor.execute(f'SELECT spins_left FROM misc WHERE user_id = {member.id}')
-            spins_left = await cursor.fetchone()
-    
-    spins_left = spins_left[0]
-
-    if spins_left is None:
-        spins_left = 10
-
-    return spins_left
-
-async def set_remaining_spins(member: discord.Member, amount: int):
-
-    async with aiosqlite.connect("gacha.sqlite") as db:
-        async with db.cursor() as cursor:
-            sql = (f'UPDATE misc SET spins_left = ? WHERE user_id = ?')
-            val = (amount, member.id)
-            await cursor.execute(sql, val)
-
-        await db.commit()
-
 
 def time_to_next_hour() -> int:
 
@@ -899,10 +1048,10 @@ def time_to_next_hour() -> int:
 
 async def refresh_spins():
     
-    with open ("last_refresh.txt", "w") as file:
+    with open ("databases/last_refresh.txt", "w") as file:
         file.write(f'{dt.datetime.now().hour}')
 
-    async with aiosqlite.connect("gacha.sqlite") as db:
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
         async with db.cursor() as cursor:
             await cursor.execute('UPDATE misc SET spins_left = 10')
 
@@ -914,38 +1063,6 @@ async def refresh_spins():
 async def slot_choices() -> list[app_commands.Choice[str]]:
     return [app_commands.Choice(name=slot) for slot in [1,2,3,4,5,6]]
 
-
-
-async def get_wish(member: discord.Member) -> str:
-
-    async with aiosqlite.connect("gacha.sqlite") as db:
-        async with db.cursor() as cursor:
-            await cursor.execute(f'SELECT wish FROM misc WHERE user_id = {member.id}')
-            wish = await cursor.fetchone()
-
-    return wish[0]
-
-
-async def set_wish(member: discord.Member, wish: str) -> str:
-
-    async with aiosqlite.connect("gacha.sqlite") as db:
-        async with db.cursor() as cursor:
-
-            if wish is None:
-                sql = f'UPDATE misc SET wish = null WHERE user_id = ?'
-                val = (member.id,)
-            else:
-                sql = f'UPDATE misc SET wish = ? WHERE user_id = ?'
-                val = (wish, member.id)
-
-            await cursor.execute(sql, val)
-        await db.commit()
-
-async def insert_user_record(database: str, table: str, member: discord.Member):
-    async with aiosqlite.connect(f"{database}.sqlite") as db:
-        async with db.cursor() as cursor:
-            await cursor.execute(f'INSERT INTO {table}(user_id) VALUES ({member.id})')
-        await db.commit()
 
 def to_progress_string(character: tuple) -> str:
     char: BaseChar = character[0]
@@ -978,4 +1095,30 @@ async def autocomplete_card(interaction: discord.Interaction, current: str) -> l
     if len(cards) > 25:
         cards = cards[:25]
     return cards
+
+async def autocomplete_item(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    items = [app_commands.Choice(name=ITEMS[item]['name'], value=item) for item in ITEMS.keys() if current.lower() in ITEMS[item]['name'].lower()]
+    if len(items) > 25:
+        items = items[:25]
+    return items
+
+async def autocomplete_inventory(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    inventory = await gacha.get_inventory(interaction.user)
+    items = [app_commands.Choice(name=ITEMS[item]['name'], value=item) for item in inventory.keys() if current.lower() in ITEMS[item]['name'].lower()]
+    if len(items) > 25:
+        items = items[:25]
+    return items
+
+async def autocomplete_inventory_farming(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    inventory = await gacha.get_inventory(interaction.user)
+    items = [app_commands.Choice(name=ITEMS[item]['name'], value=item) for item in inventory.keys() if current.lower() in ITEMS[item]['name'].lower() and (ITEMS[item].get('farming_grow', None) or ITEMS[item].get('farming_harvest', None) or ITEMS[item].get('farming_extract', None))]
+    if len(items) > 25:
+        items = items[:25]
+    return items
+
+async def autocomplete_recipe(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    recipes = [app_commands.Choice(name=recipe["name"], value=recipe["name"]) for recipe in RECIPES.values() if current.lower() in recipe['name'].lower()]
+    if len(recipes) > 25:
+        recipes = recipes[:25]
+    return recipes
     

@@ -20,14 +20,19 @@ class BaseCard():
     priority: int = field(default=0, kw_only=True)
     tags: tuple = field(default=tuple(), kw_only=True)
     filename: str = field(default=None, kw_only=True)
+    card_set: str = field(default='base', kw_only=True)
 
     revealed: int = field(default=0, kw_only=True)
+    original_cost: int = field(default=None, init=False)
+    original_priority: int = field(default=None, init=False)
     owner: "battles.Player" = field(default=None, init=False)  # not included in constructor because only assigned to copies used in battles
     location: str = field(default=None, init=False)
     negated: bool = field(default=False, init=False)
     energy_spent: int = field(default=0, init=False)
     
-
+    def __post_init__(self):
+        self.original_cost = self.cost
+        self.original_priority = self.priority
 
     def copy(self):
         return copy.deepcopy(self)
@@ -59,6 +64,8 @@ class BaseCard():
         success = await self.owner.zones.move(self, destination)
         if success:
             self.negated = False
+            self.cost = self.original_cost
+            self.priority = self.original_priority
             if self.revealed == 1:
                 self.revealed = 0
             

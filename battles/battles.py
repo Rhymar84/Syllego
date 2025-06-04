@@ -88,7 +88,7 @@ class CardZones():
         await self.shuffle_deck()
 
     async def new_hand(self):
-        for card in self.hand + self.selection:
+        for card in [x for x in self.hand if 'sticky' not in x.keywords] + self.selection:
             await card.discard(False)
 
         await self.player.draw(5, False)
@@ -254,6 +254,8 @@ class Character():
                 case 'active_cooldown':
                     if self.active_ability.cooldown > value:
                         met = False
+                case _:
+                    continue
 
         return met
     

@@ -237,7 +237,7 @@ class SwitchCharacters(BaseAction):
     def __init__(self, player: battles.Player, character: battles.Character):
         super().__init__(player)
         self.character = character
-        self.priority = 5
+        self.priority = 6
 
     async def activate(self):
         await self.player.switch_character(self.character)

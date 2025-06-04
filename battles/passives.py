@@ -123,12 +123,12 @@ class BasePassive():
 
 @dataclass
 class ErenPassive(BasePassive):
-    """**Turn Start**
+    """**▼Turn Start**
     - Recover 3% Max Health.
-    **Switch In**
+    **▼Switch In**
     - Gain 20 Shield.
     - Negate Attribute Disadvantage for the rest of the round.
-    **Adaptive Card**
+    **▼Adaptive Card**
     **[Titan Shift]:** Transform into the *Attack Titan*.
     """
     name: str = "Unrivalled Tenacity"
@@ -142,7 +142,7 @@ class ErenPassive(BasePassive):
 
 @dataclass
 class Safeguard(BasePassive):
-    """**Switch Out**
+    """**▼Switch Out**
     - Next ally takes -50% damage for 1 turn.
     """
     name: str = "Safeguard"
@@ -152,7 +152,7 @@ class Safeguard(BasePassive):
 
 @dataclass
 class SashaPassive(BasePassive):
-    """**Base Effects**
+    """**▼Base Effects**
     This character's *Projectile* attacks deal +35% damage."""
     name: str = 'Marksman'
     
@@ -161,7 +161,7 @@ class SashaPassive(BasePassive):
 
 @dataclass
 class ConniePassive(BasePassive):
-    """**Base Effects**
+    """**▼Base Effects**
     This character is immune to the *Trapped* status effect."""
     name: str = "Omni-Directional Expert"
 
@@ -177,7 +177,7 @@ class ConniePassive(BasePassive):
 
 @dataclass
 class NobaraPassive(BasePassive):
-    """**When Hit**
+    """**▼When Hit**
     - Echo 50% of damage taken back to the opponent."""
     name: str = "Straw Doll: Resonance"
 
@@ -188,7 +188,7 @@ class NobaraPassive(BasePassive):
 
 @dataclass
 class HeavenlyRestriction(BasePassive):
-    """**Base Effects**
+    """**▼Base Effects**
     - This character's *Contact* attacks deal +50% damage.
     - This character cannot use non-attack cards.
     """
@@ -202,7 +202,7 @@ class HeavenlyRestriction(BasePassive):
 
 @dataclass
 class MusterEnergy(BasePassive):
-    """**Spend Energy**
+    """**▼Spend Energy**
     - If your last energy was spent, replenish 1 energy (once per battle).
     """
     name: str = "Muster Energy"
@@ -216,7 +216,7 @@ class MusterEnergy(BasePassive):
 
 @dataclass
 class NanamiPassive(BasePassive):
-    """**Base Effects**
+    """**▼Base Effects**
     - This character deals +70% damage on round 10 or later.
     """
     name: str = field(default="Overtime", init=False)
@@ -237,9 +237,9 @@ class NanamiPassive(BasePassive):
 
 @dataclass
 class GonPassive(BasePassive):
-    """**Land Attack**
+    """**▼Land Attack**
     - This character takes -5% damage (persistent).
-    **When Hit**
+    **▼When Hit**
     - This character deals +5% damage (persistent).
     - This character's *Jajanken* attacks deal +10% damage (persistent).
     """
@@ -271,14 +271,13 @@ class GonPassive(BasePassive):
 
 @dataclass
 class PitouPassive(BasePassive):
-    """**Switch In**
-    The following effects activate if the active ally is below 50% health, or *Tag: Chimera Ant*:
+    """▼**Switch In**
+    If the active ally is below 50% health, or *Tag: Chimera Ant*:
     - This character gains 50 shield.
     - Draw 1 card.
     - Reduce enemy energy by 1 (once per battle).
-    **Turn End**
+    **▼Turn End (Global)**
     - If an enemy was defeated this turn, permanently reveal the opponent's hand and the top 5 cards of their deck.
-    This effect still activates when the user is on standby.
     """
     name: str = "Puppeteering"
     disrupt_used: bool = field(default=False, init=False)

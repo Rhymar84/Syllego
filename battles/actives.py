@@ -174,14 +174,15 @@ class DoctorBlythe(BaseActive):
     - *Doctor Blythe* cannot be toggled again for 1 round.
 
     **__Doctor Blythe: On__**
-    **Base Effects**
+    **▼Base Effects**
     - This character deals -50% damage.
     - This character takes +50% damage.
-    **Turn Start**
+    **▼Turn Start (Global)**
     - Targeted ally recovers 10% Max Health. If they are already at full health, *Doctor Blythe* is toggled off.
     This effect still activates when the user is on standby.
-    **Round Start**
-    - Expend 1 Energy if the user is on standby. If the energy cost cannot be paid, *Doctor Blythe* is toggled off.
+    **▼Round Start**
+    If user is on standby:
+    - Expend 1 Energy to maintain *Doctor Blythe*.
     Requirements: Round 2+
     """
     name: str = "Doctor Blythe"

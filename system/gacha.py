@@ -1,11 +1,11 @@
 import discord
 import sqlite3
 import random
-import bot
 import math
 import datetime as dt
 import asyncio
 import aiosqlite
+import config
 from system.character_database import CHARACTERS, BaseChar, get_party_image
 from battles.characters import FIGHTERS
 from time import perf_counter
@@ -14,9 +14,6 @@ from io import BytesIO
 from functools import lru_cache
 from discord.utils import get
 from discord.ui import Select, View
-from config import TOKEN, ErrorColour
-from config import SERVER
-from config import DEBUG
 from dataclasses import dataclass, field
 
 intents = discord.Intents.all()
@@ -64,22 +61,22 @@ class Spin(discord.ui.View):
             await interaction.response.defer()
             return
         if interaction.user != self.original_interaction.user:
-            embed = discord.Embed(title='Error', description='This is not your spin!', color=ErrorColour)
+            embed = discord.Embed(title='Error', description='This is not your spin!', color=config.ErrorColour)
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         
-        starpower = await bot.get_starpower(interaction.user)
+        starpower = await get_starpower(interaction.user)
         
         if starpower < 50:
-            embed = discord.Embed(title='Not Enough Starpower :(', description=f'Your summons cost 50% Starpower, but you only have **{starpower}%**. Starpower recharges at a rate of 20%/h.', color=ErrorColour)
+            embed = discord.Embed(title='Not Enough Starpower :(', description=f'Your summons cost 50% Starpower, but you only have **{starpower}%**. Starpower recharges at a rate of 20%/h.', color=config.ErrorColour)
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
 
         char_level = await give_character(interaction.user, self.character.id)
-        await bot.set_starpower(interaction.user, starpower - 50)
-        await bot.set_last_starpower_update(interaction.user, dt.datetime.now())
+        await set_starpower(interaction.user, starpower - 50)
+        await set_last_starpower_update(interaction.user, dt.datetime.now())
 
         self.character_level = char_level
         if char_level == 1:
@@ -103,13 +100,13 @@ class Spin(discord.ui.View):
         embed.set_image(url=f'attachment://portrait.jpg')
         embed.set_author(name=f'{self.original_interaction.user.display_name}', icon_url=f'{self.original_interaction.user.display_avatar}')
         
-        remaining_spins = await bot.get_remaining_spins(self.original_interaction.user)
-        await bot.set_remaining_spins(self.original_interaction.user, remaining_spins - 1)
+        remaining_spins = await get_remaining_spins(self.original_interaction.user)
+        await set_remaining_spins(self.original_interaction.user, remaining_spins - 1)
         try:
             await self.original_interaction.response.send_message(embed=embed, file=portrait, view=self)
         except Exception as e:
-            remaining_spins = await bot.get_remaining_spins(self.original_interaction.user)
-            await bot.set_remaining_spins(self.original_interaction.user, remaining_spins + 1)
+            remaining_spins = await get_remaining_spins(self.original_interaction.user)
+            await set_remaining_spins(self.original_interaction.user, remaining_spins + 1)
             raise e
 
 
@@ -142,20 +139,20 @@ class TakeJarButton(discord.ui.Button):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user == self.original_interaction.user:
             return True
-        await interaction.response.send_message(ephemeral=True, embed=discord.Embed(description='This is not your spin!', color=ErrorColour))
+        await interaction.response.send_message(ephemeral=True, embed=discord.Embed(description='This is not your spin!', color=config.ErrorColour))
         return False
     
     async def callback(self, interaction: discord.Interaction):
 
-        starpower = await bot.get_starpower(interaction.user)
+        starpower = await get_starpower(interaction.user)
         
         if starpower < 50:
-            embed = discord.Embed(title='Not Enough Starpower :(', description=f'Your summons cost 50% Starpower, but you only have **{starpower}%**. Starpower recharges at a rate of 20%/h.', color=ErrorColour)
+            embed = discord.Embed(title='Not Enough Starpower :(', description=f'Your summons cost 50% Starpower, but you only have **{starpower}%**. Starpower recharges at a rate of 20%/h.', color=config.ErrorColour)
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
-        await bot.set_starpower(interaction.user, starpower - 50)
-        await bot.set_last_starpower_update(interaction.user, dt.datetime.now())
+        await set_starpower(interaction.user, starpower - 50)
+        await set_last_starpower_update(interaction.user, dt.datetime.now())
 
         jars_gained = 1 if self.character.rarity == 1 else 3 if self.character.rarity == 2 else 10
         await gain_jars(interaction.user, jars_gained)
@@ -243,12 +240,117 @@ class PartyObject():
 
 ########################################################################################
 
+
+async def check_last_starpower_update(member: discord.Member) -> dt.datetime:
+
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT last_starpower_update FROM misc WHERE user_id = {member.id}')
+            last_update = await cursor.fetchone()
+
+    if not last_update:
+        last_update = ('24-09-2003 00:00',)
+
+    return dt.datetime.strptime(last_update[0], "%d-%m-%Y %H:%M")
+
+async def set_last_starpower_update(member: discord.Member, time: dt.datetime):
+
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = (f'UPDATE misc SET last_starpower_update = ? WHERE user_id = ?')
+            val = (time.strftime("%d-%m-%Y %H:%M"), member.id)
+            await cursor.execute(sql, val)
+
+        await db.commit()
+    
+
+
+async def set_starpower(member: discord.Member, amount: int):
+
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = (f'UPDATE misc SET starpower = ? WHERE user_id = ?')
+            val = (amount, member.id)
+            await cursor.execute(sql, val)
+
+        await db.commit()
+
+
+
+async def get_starpower(member: discord.Member) -> int:
+
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT starpower FROM misc WHERE user_id = {member.id}')
+            starpower = await cursor.fetchone()
+
+    starpower = starpower[0]
+
+    if not starpower:
+        starpower = 0
+
+    # Get number of seconds since last starpower update
+    last_update = await check_last_starpower_update(member)
+    now = dt.datetime.now()
+    difference = now - last_update
+    seconds = difference.total_seconds()
+
+    # If starpower is full return 100
+    if starpower >= 100 or starpower is None:
+        return 100
+    
+    # Every 3 minutes = 1 starpower, so if less than 3 minutes have passed since last check don't add any
+    if seconds < 180:
+        return starpower
+
+    # Get starpower recharged
+    missing_starpower = 100 - starpower
+    recharged_starpower = int(seconds / 180)
+
+    # If 5 minutes have passed, last update should be offset by 2 minutes so that those minutes aren't lost.
+    leftover = seconds - (180 * recharged_starpower)
+    leftover = dt.timedelta(seconds=leftover)
+
+
+    await set_last_starpower_update(member, now-leftover)
+
+    if recharged_starpower > missing_starpower:
+        recharged_starpower = missing_starpower
+
+    await set_starpower(member, starpower + recharged_starpower)
+    
+    return starpower + recharged_starpower
+
+
+async def get_remaining_spins(member: discord.Member) -> int:
+
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT spins_left FROM misc WHERE user_id = {member.id}')
+            spins_left = await cursor.fetchone()
+    
+    spins_left = spins_left[0]
+
+    if spins_left is None:
+        spins_left = 10
+
+    return spins_left
+
+async def set_remaining_spins(member: discord.Member, amount: int):
+
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = (f'UPDATE misc SET spins_left = ? WHERE user_id = ?')
+            val = (amount, member.id)
+            await cursor.execute(sql, val)
+
+        await db.commit()
     
 
 
 async def get_collection(member: discord.Member, format: str='images') -> list:
 
-    async with aiosqlite.connect("gacha.sqlite") as db:
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
         async with db.cursor() as cursor:
             await cursor.execute(f'SELECT * FROM collection WHERE user_id = {member.id}')
             levels = await cursor.fetchall()
@@ -300,7 +402,7 @@ async def get_collection(member: discord.Member, format: str='images') -> list:
 
 
 async def verify_collection(member: discord.Member, insert_if_missing: bool = True):
-    async with aiosqlite.connect("gacha.sqlite") as db:
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
         async with db.cursor() as cursor:
             await cursor.execute(f'SELECT * FROM collection WHERE user_id = {member.id}')
             fetched = await cursor.fetchall()
@@ -309,7 +411,7 @@ async def verify_collection(member: discord.Member, insert_if_missing: bool = Tr
         fetched = fetched[0]
     except:
         if insert_if_missing:
-            async with aiosqlite.connect("gacha.sqlite") as db:
+            async with aiosqlite.connect("databases/gacha.sqlite") as db:
                 async with db.cursor() as cursor:
                     await cursor.execute(f'INSERT INTO collection (user_id) VALUES({member.id})')
         else:
@@ -317,14 +419,37 @@ async def verify_collection(member: discord.Member, insert_if_missing: bool = Tr
         
     return True
 
+async def get_wish(member: discord.Member) -> str:
 
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT wish FROM misc WHERE user_id = {member.id}')
+            wish = await cursor.fetchone()
+
+    return wish[0]
+
+
+async def set_wish(member: discord.Member, wish: str) -> str:
+
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+
+            if wish is None:
+                sql = f'UPDATE misc SET wish = null WHERE user_id = ?'
+                val = (member.id,)
+            else:
+                sql = f'UPDATE misc SET wish = ? WHERE user_id = ?'
+                val = (wish, member.id)
+
+            await cursor.execute(sql, val)
+        await db.commit()
 
 
 async def do_spin(member: discord.Member):
     
 
     # 10% chance to guarantee a character from wished series 
-    wish = await bot.get_wish(member)
+    wish = await get_wish(member)
     if wish is not None:
         wish_chance = 0.1
         wish_roll = random.random()
@@ -398,7 +523,7 @@ async def get_character_level(member: discord.Member, id: str):
     if id is None:
         return 0
 
-    async with aiosqlite.connect("gacha.sqlite") as db:
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
         async with db.cursor() as cursor:
             await cursor.execute(f'SELECT "{id}" FROM collection WHERE user_id = {member.id}')
             level = await cursor.fetchone()
@@ -425,7 +550,7 @@ async def give_character(member: discord.Member, character: str) -> float:
     else:
         newLevel = level + 1
 
-    async with aiosqlite.connect("gacha.sqlite") as db:
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
         async with db.cursor() as cursor:
             sql = (f'UPDATE collection SET "{character}" = ? WHERE user_id = ?')
             val = (newLevel, member.id)
@@ -438,7 +563,7 @@ async def give_character(member: discord.Member, character: str) -> float:
 
 async def get_party(member: discord.Member):
 
-    async with aiosqlite.connect("party.sqlite") as db:
+    async with aiosqlite.connect("databases/party.sqlite") as db:
         async with db.cursor() as cursor:
 
             await cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party1 WHERE user_id = {member.id}')
@@ -457,7 +582,7 @@ async def edit_slot(member: discord.Member, slot: str, character: str):
 
     slot_index = slot[4::4]
 
-    async with aiosqlite.connect("party.sqlite") as db:
+    async with aiosqlite.connect("databases/party.sqlite") as db:
         async with db.cursor() as cursor:
             await cursor.execute(f'SELECT slot1, slot2, slot3, slot4, slot5, slot6 FROM party1 WHERE user_id = {member.id}')
             party = await cursor.fetchall()
@@ -488,7 +613,7 @@ async def edit_slot(member: discord.Member, slot: str, character: str):
 
 async def clearParty(member: discord.Member):
 
-    async with aiosqlite.connect("party.sqlite") as db:
+    async with aiosqlite.connect("databases/party.sqlite") as db:
         async with db.cursor() as cursor:
 
             for index in range(6):
@@ -509,26 +634,242 @@ def get_pool(rarity: int, series: str | None) -> list[BaseChar]:
 
 async def get_jars(member: discord.Member, insert_if_none: bool=False):
     
-    async with aiosqlite.connect("eco.sqlite") as db:
+    async with aiosqlite.connect("databases/eco.sqlite") as db:
         async with db.cursor() as cursor:
             await cursor.execute(f'SELECT jars FROM currencies WHERE user_id = {member.id}')
             jars = await cursor.fetchone()
 
     if not jars:
         if insert_if_none:
-            await bot.insert_user_record('eco', 'currencies', member)
+            await insert_user_record('eco', 'currencies', member)
         jars = [0]
         
-    return jars[0]
+    return 0 if jars[0] is None else jars[0]
             
 
 async def gain_jars(member: discord.Member, amount: int):
 
     current_jars = await get_jars(member, True)
 
-    async with aiosqlite.connect("eco.sqlite") as db:
+    async with aiosqlite.connect("databases/eco.sqlite") as db:
         async with db.cursor() as cursor:
             sql = ('UPDATE currencies SET jars = ? WHERE user_id = ?')
             val = (current_jars + amount, member.id)
             await cursor.execute(sql, val)
             await db.commit()
+
+async def get_item_count(member: discord.Member, item_id: str):
+
+    async with aiosqlite.connect("databases/eco.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT {item_id} FROM inventory WHERE user_id = {member.id}')
+            count = await cursor.fetchone()
+
+    if not count:
+        await insert_user_record('eco', 'inventory', member)
+        count = [0]
+
+    return 0 if count[0] is None else count[0]
+
+async def gain_item(member: discord.Member, item_id: str, amount: int):
+
+    current_count = await get_item_count(member, item_id)
+
+    async with aiosqlite.connect("databases/eco.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = (f'UPDATE inventory SET {item_id} = ? WHERE user_id = ?')
+            val = (current_count + amount, member.id)
+            await cursor.execute(sql, val)
+            await db.commit()
+
+async def redeem_item(member: discord.Member, item_id: str):
+    from system.items import ITEMS
+
+    item = ITEMS[item_id]
+    func, kwargs = item['redeem'].values()
+
+    response = await func(member, **kwargs)
+    await gain_item(member, item_id, -1)
+    return response
+
+def get_item_id(item: str) -> str:
+    from system.items import ITEMS
+    for key, value in ITEMS.items():
+        if value['name'] == item:
+            return key
+        
+async def get_inventory(member: discord.Member):
+    from system.items import ITEMS
+    inventory = {}
+
+    for item_id in ITEMS.keys():
+        count = await get_item_count(member, item_id)
+        if count > 0:
+            inventory[item_id] = count
+
+    return inventory
+
+async def random_card(pack: str = 'base') -> str:
+    from battles.cards import Cards
+
+    uncommon_chance = 0.25
+    rare_chance = 0.08
+    legendary_chance = 0.02
+
+    rarity = random.random()
+    if rarity <= legendary_chance:
+        rarity = 'legendary'
+    elif rarity <= rare_chance + legendary_chance:
+        rarity = 'rare'
+    elif rarity <= uncommon_chance + rare_chance + legendary_chance:
+        rarity = 'uncommon'
+    else:
+        rarity = 'common'
+
+    pool = [card.name for card in Cards if card.value.rarity == rarity and card.value.card_set == pack]
+    return random.choice(pool)
+
+
+async def open_pack(member: discord.Member, pack: str, count: int):
+    from battles.cards import Cards
+
+    pulls = []
+    for _ in range(count):
+        pulls.append(await random_card(pack))
+    
+    embed = discord.Embed(title=f'{pack.title()} Pack', color=0xf5ed07, description='\n'.join([f"- {config.CARD_RARITY_KEY[Cards[card].value.rarity]} {Cards[card].value.name}" for card in pulls]))
+    embed.set_author(name=f'{member.display_name}', icon_url=f'{member.display_avatar}')
+
+    for pull in pulls:
+        await gain_card(member, pull)
+
+    return embed
+
+async def get_card_count(member: discord.Member, card: str):
+    
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT {card} FROM cards WHERE user_id = {member.id}')
+            count = await cursor.fetchone()
+
+    if not count:
+        await insert_user_record('gacha', 'cards', member)
+        return 0
+
+    return 0 if count[0] is None else count[0]
+
+async def gain_card(member: discord.Member, card: str):
+
+    current_count = await get_card_count(member, card)
+
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = (f'UPDATE cards SET {card} = ? WHERE user_id = ?')
+            val = (current_count + 1, member.id)
+            await cursor.execute(sql, val)
+            await db.commit()
+
+
+async def get_binder(member: discord.Member, sort: str = 'rarity') -> dict:
+
+    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT * FROM cards WHERE user_id = {member.id}')
+            copies = await cursor.fetchone()
+
+            await cursor.execute('PRAGMA table_info(cards)')
+            card_ids = await cursor.fetchall()
+
+    if not copies:
+        return {}
+    
+    card_ids = [x[1].upper() for x in card_ids]
+
+    binder = list(zip(card_ids, copies))
+    # Removing (user_id and its column)
+    binder.pop(0)
+
+    binder = [card for card in binder if card[1]]
+
+    match sort:
+        case 'rarity':
+            binder.sort(key= lambda x: (binder_sort_rarity(x), x[0]))
+        case 'alphabetical':
+            binder = sorted(binder, key=lambda x: x[0])
+        case 'copies':
+            binder.sort(key = lambda x: (x[1] * -1, binder_sort_rarity(x), x[0]))
+        case _:
+            binder.sort(key= lambda x: (binder_sort_rarity(x), x[0]))
+    
+    return {x[0]: x[1] for x in binder}
+
+
+
+
+
+def binder_sort_rarity(card: tuple) -> int:
+    from battles.cards import Cards
+    card: str = card[0]
+
+    rarity = Cards[card].value.rarity
+
+    match rarity:
+        case 'basic':
+            return 4
+        case 'common':
+            return 3
+        case 'uncommon':
+            return 2
+        case 'rare':
+            return 1
+        case 'legendary':
+            return 0
+        case _:
+            return 4
+
+
+async def get_daily_missions(member: discord.Member) -> dict:
+
+    async with aiosqlite.connect("databases/missions.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT * FROM daily WHERE user_id = {member.id}')
+            missions = await cursor.fetchone()
+
+            await cursor.execute('PRAGMA table_info(daily)')
+            mission_ids = await cursor.fetchall()
+
+    ids = [x[1] for x in mission_ids][1:]
+
+    if not missions:
+        await insert_user_record('missions', 'daily', member)
+        return {id: False for id in ids}
+
+    missions = missions[1:]
+
+    return {id: bool(mission) for id, mission in zip(ids, missions)}
+
+
+async def get_item_obtaining_string(item: str) -> str:
+    import system.farming as farming
+    from system.items import ITEMS
+
+    farming_sources = await farming.get_item_farming_obtaining(item)
+
+    if not farming_sources:
+        return ''
+    
+    text = f"\n\n**Obtaining**\n"
+    farming_sources_strings = [f"- {ITEMS[x['input_item']]['name']} {farming.FARMING_MODE_MAP[x['mode']]}➡️ {ITEMS[item]['name']} x{x['output_quantity']}" for x in farming_sources]
+
+    text += "\n".join(farming_sources_strings)
+
+    return text
+    
+async def get_settings(member: discord.Member) -> dict:
+    return {"farming_dms": True, "refinery_dms": True}
+
+async def insert_user_record(database: str, table: str, member: discord.Member):
+    async with aiosqlite.connect(f"databases/{database}.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'INSERT INTO {table}(user_id) VALUES ({member.id})')
+        await db.commit()
