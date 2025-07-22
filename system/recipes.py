@@ -188,7 +188,7 @@ RECIPES = {
             "normal": (
                 {
                     "chance": 0.66,
-                    "loot": {"myriad_mineral": 1}
+                    "loot": {"elemental_nucleus": 1}
                 },
                 {
                     "chance": 0.08,

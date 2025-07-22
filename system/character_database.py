@@ -5,11 +5,12 @@ from inspect import cleandoc
 
 class BaseChar():
 
-    def __init__(self, id: str, name: str, rarity: int, series: str, short_name: str | None = None):
+    def __init__(self, id: str, name: str, rarity: int, series: str, short_name: str | None = None, boost_item: str | None = None):
         self.id = id
         self.name = name
         self.rarity = rarity
         self.series = series
+        self.boost_item = boost_item
         
         if short_name:
             self.short_name = short_name
@@ -30,7 +31,7 @@ class BaseChar():
         
 
         if level != 0:
-            stars = '⭐' * int(level)
+            stars = '<:booststar:1383049826073051253>' * max(int(level - 5), 0) + '⭐' * int(min(level, 10 - level))
         else:
             stars = '🔒'
 
@@ -73,6 +74,10 @@ class CharInfo(discord.ui.View):
         tags = [f"**{x}**🧬" for x in character['chemistry_tags']] + character['tags']
         if tags:
             text +=f"\n\n*Tags: {', '.join(tags)}*"
+        if self.base_char.boost_item:
+            from system.farming import item_display_string
+            newline = '\n' if tags else ''
+            text += f"{newline}\n*Boost:*{item_display_string(self.base_char.boost_item)}**"
 
         embed = discord.Embed(title=f"{config.COLOUR_EMOJI_KEY[attribute]} {self.base_char.name}", description = text, color=config.CHARACTER_EMBED_COLOUR)
         thumbnail = get_party_image(self.base_char, self.level)

@@ -103,7 +103,7 @@ async def get_aiofu_embed(member: discord.Member) -> tuple[discord.Embed, discor
                 content += f"⛔ **__SLOT {slot['slot']}__\n** <Locked>\n\n"
         else:
             if slot["time_left"] <= 0:
-                content += f"✅ **__SLOT {slot['slot']}__\n** {FARMING_MODE_MAP[slot['processing_type']]} *{items.ITEMS[slot['item']]['name']}* `Done!`\n\n"
+                content += f"✅ **__SLOT {slot['slot']}__\n** {FARMING_MODE_MAP[slot['processing_type']]} *{item_display_string(slot['item'])}* `Done!`\n\n"
             else:
                 minutes = slot["time_left"]
                 hours = int(minutes / 60)
@@ -112,7 +112,7 @@ async def get_aiofu_embed(member: discord.Member) -> tuple[discord.Embed, discor
                 hours = hours % 24
                 time = f"{('0' + str(days) + ':' if days < 10 else str(days) + ':') if days else ''}{'0' + str(hours) if hours < 10 else str(hours)}:{'0' + str(minutes) if minutes < 10 else str(minutes)}"
                 
-                content += f"⌛ **__SLOT {slot['slot']}__\n** {FARMING_MODE_MAP[slot['processing_type']]} *{items.ITEMS[slot['item']]['name']}* `{time}`\n\n"
+                content += f"⌛ **__SLOT {slot['slot']}__\n** {FARMING_MODE_MAP[slot['processing_type']]} *{item_display_string(slot['item'])}* `{time}`\n\n"
 
     embed = discord.Embed(
         title="AIO Farming Unit",
@@ -187,7 +187,7 @@ class FarmingCollectButton(discord.ui.Button):
                 print(f"Error: Item '{slot['item']}' harvesting encountered Key Error. Likely because it has no loot table.")
         
         if harvested:
-            harvested_string = '\n'.join([f"- {items.ITEMS[x[0]]['name']} x**{x[1]}**" for x in harvested.items()])
+            harvested_string = '\n'.join([f"- {item_display_string(x[0])} x**{x[1]}**" for x in harvested.items()])
             message = f"✨ **The following items were obtained!** ✨\n{harvested_string}"
         else:
             message = f"Oh no! The processing failed. Nothing was obtained :("
@@ -496,13 +496,13 @@ class RefineryCollectButton(discord.ui.Button):
                 print(f"Error: Recipe '{slot['recipe']}' collection encountered Key Error. Likely because it has no loot table.")
         
         if harvested:
-            harvested_string = '\n'.join([f"- {items.ITEMS[x[0]]['name']} x**{x[1]}**" for x in harvested.items()])
+            harvested_string = '\n'.join([f"- {item_display_string(x[0])} x**{x[1]}**" for x in harvested.items()])
             if not failure_text:
                 message = f"✨ **The following items were obtained!** ✨\n{harvested_string}"
             else:
                 message = f"😕 **Oh no! The refinement failed. The following items were salvaged: 😕**\n{harvested_string}"
         else:
-            message = f"Oh no! The refinement failed. Nothing was obtained :("
+            message = f"⛈️ Oh no! The refinement failed. Nothing was obtained :( ⛈️"
 
         embed, view = await get_refinery_embed(self.user)
 
@@ -539,7 +539,7 @@ async def check_refining_errors(interaction: discord.Interaction, recipe: str, m
     inventory = await gacha.get_inventory(interaction.user)
     for item, count in recipes.RECIPES[recipe]["ingredients"].items():
         if item not in inventory.keys() or inventory[item] < count:
-            await interaction.response.send_message(embed=discord.Embed(description=f"You do not own enough '{items.ITEMS[item]['name']}' for this recipe.", color=config.ErrorColour), ephemeral=True)
+            await interaction.response.send_message(embed=discord.Embed(description=f"You do not own enough '{item_display_string(item)}' for this recipe.", color=config.ErrorColour), ephemeral=True)
             return True
     if not await has_unlocked_refinement_mode(interaction.user, mode):
         await interaction.response.send_message(embed=discord.Embed(description=f"You have not unlocked that refinement mode. Use /refinery upgrade to unlock it.", color=config.ErrorColour), ephemeral=True)
@@ -572,7 +572,7 @@ async def start_refining(member: discord.Member, recipe_id: str, mode: int):
     settings = await gacha.get_settings(member)
     if settings["refinery_dms"]:
         completion_time = dt.datetime.now() + dt.timedelta(minutes=time)
-        heapq.heappush(farming_notifications, (completion_time, member))
+        heapq.heappush(refinery_notifications, (completion_time, member))
 
 async def has_unlocked_refinement_mode(member: discord.Member, mode: str) -> bool:
     match mode:
@@ -587,7 +587,7 @@ async def get_recipes(item: str) -> list:
 
     for id, recipe in recipes.RECIPES.items():
         for table in recipe["loot_tables"].values():
-            if any([item in x["loot"].keys() for x in table]):
+            if any([not x.get("display_failure", False) and item in x["loot"].keys() for x in table]):
                 item_recipes.append(id)
                 break
 
@@ -618,8 +618,8 @@ class ViewRecipesButton(discord.ui.Button):
             ingredients = recipe["ingredients"]
             loot_table = recipe["loot_tables"]["ideal"][0]["loot"]
 
-            ingredients_strings = "\n".join([f"- {items.ITEMS[k]['name']} x**{v}**" for k,v in ingredients.items()])
-            loot_strings = "\n".join([f"- {items.ITEMS[k]['name']} x**{v}**" for k,v in loot_table.items()])
+            ingredients_strings = "\n".join([f"- {item_display_string(k)} x**{v}**" for k,v in ingredients.items()])
+            loot_strings = "\n".join([f"- {item_display_string(k)} x**{v}**" for k,v in loot_table.items()])
             ideal_modes = ", ".join([f"{REFINERY_MODE_NAMES[x][:-2]}" for x in recipe["ideal_modes"]])
             normal_modes = ", ".join([f"{REFINERY_MODE_NAMES[x][:-2]}" for x in recipe["normal_modes"]])
 
@@ -629,3 +629,7 @@ class ViewRecipesButton(discord.ui.Button):
         from bot import Book
         book = Book(interaction, embeds)
         await book.edit_create()
+
+def item_display_string(item_id: str) -> str:
+    emoji = items.ITEMS[item_id].get('emoji', '')
+    return f"{emoji + ' ' if emoji else ''}{items.ITEMS[item_id]['name']}"

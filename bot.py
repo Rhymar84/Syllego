@@ -526,7 +526,9 @@ def run_discord_bot():
                 pass
             embed.set_thumbnail(url=f"attachment://{thumbnail.filename}")
 
-        await interaction.followup.send(embed=embed, file=thumbnail)
+            await interaction.followup.send(embed=embed, file=thumbnail)
+        else:
+            await interaction.followup.send(embed=embed)
 
     ##### STATUS
     @tree.command(
@@ -742,7 +744,7 @@ def run_discord_bot():
             await interaction.response.send_message(embed=discord.Embed(description='Your inventory is empty.', color=config.INVENTORY_COLOUR))
             return
 
-        inventory = [f"{count}x **{ITEMS[id]['name']}**" for id, count in inventory.items()]
+        inventory = [f"{count}x **{farming.item_display_string(id)}**" for id, count in inventory.items()]
         inventory.sort(key=lambda x: int(x.split('x')[0]), reverse=True)
         inventory = [f"- {x}" for x in inventory]
 
@@ -754,7 +756,7 @@ def run_discord_bot():
             embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar)
             embeds.append(embed)
 
-            inventory = inventory[16:]
+            inventory = inventory[15:]
         
         if len(embeds) > 1:
             for index, embed in enumerate(embeds):
@@ -775,17 +777,27 @@ def run_discord_bot():
         
         obtaining = await gacha.get_item_obtaining_string(item)
         item_recipes = await farming.get_recipes(item)
+        item_id = item
         item = ITEMS[item]
         
         await interaction.response.defer()
         embed = discord.Embed(title=item["name"], description=f"{item['description']}{obtaining}", color=0xfcba03)
+        
+        kwargs = {"embed": embed}
+
+        try:
+            thumbnail = discord.File(fp=f"Assets/Items/{item_id}.png", filename=f'item.png')
+            embed.set_thumbnail(url=f"attachment://item.png")
+            kwargs["file"] = thumbnail
+        except FileNotFoundError:
+            pass
 
         if item_recipes:
             view = discord.ui.View()
             view.add_item(farming.ViewRecipesButton(interaction.user, item_recipes))
-            await interaction.followup.send(embed=embed, view=view)
-        else:
-            await interaction.followup.send(embed=embed)
+            kwargs["view"] = view
+            
+        await interaction.followup.send(**kwargs)
 
 
     @item_group.command(description='Redeem an item.')
@@ -964,6 +976,12 @@ def run_discord_bot():
             settings = await gacha.get_settings(user)
             if settings["farming_dms"]:
                 await farming.send_aiofu_notification(user)
+
+        while farming.refinery_notifications and farming.refinery_notifications[0][0] <= now:
+            _, user = heapq.heappop(farming.refinery_notifications)
+            settings = await gacha.get_settings(user)
+            if settings["refinery_dms"]:
+                await farming.send_refinery_notification(user)
 
 
 

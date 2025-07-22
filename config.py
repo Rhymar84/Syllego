@@ -43,7 +43,8 @@ COLOUR_EMOJI_KEY = {
     'blue': '<:blue:1340777059743567992>',
     'green': '<:green:1340777061232545864>',
     'yellow': '<:yellow:1340777065590292530>',
-    'orange': '<:orange:1340777062553747456>'
+    'orange': '<:orange:1340777062553747456>',
+    'black': ''
 }
 SWITCH_CD_KEY = {
     10: '🕑',
@@ -68,5 +69,6 @@ COLOUR_MATCHUPS = {
 # Battle Parameters
 MAX_HAND_SIZE = 5
 DECISION_TIME = 120
+SWITCH_COOLDOWN = 8
 def round_energy(round:int) -> int:
     return 3 if round < 5 else 4 if round < 10 else 5

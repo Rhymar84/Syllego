@@ -391,6 +391,11 @@ class Character():
             self.owner.opponent.log(f"> Opponent's energy next turn will be reduced by **{amount}**.")
             return True
         return False
+    
+    async def modify_switch_cooldown(self, turns: int):
+        self.switch_cooldown = max(0, self.switch_cooldown + turns)
+        self.owner.battle.log(f"> *{self.name}*'s switch cooldown was {'increased' if turns > 0 else 'reduced'} by **{turns}**.")
+
 
     ## Event trigger functions: simply calls the associated function in the ability object(s).
     async def targeted_by_attack(self):
@@ -508,6 +513,9 @@ class Player():
 
         return embed
     
+    def get_characters(self) -> list[Character]:
+        return [char for char in self.characters]
+    
     async def push_log(self):
         if self.turn_log:
             embed=discord.Embed(color=0x0a7a22, description='\n'.join(self.turn_log))
@@ -557,7 +565,7 @@ class Player():
             self.opponent.log(f"- **Opponent tagged in *{target.name}***.")
 
         if active:
-            active.switch_cooldown = 10
+            active.switch_cooldown = min(active.switch_cooldown, 0) + config.SWITCH_COOLDOWN
             await active.on_switch_out(target)
         await target.on_switch_in(active)
         target.switch_cooldown = 0 # In case a character is forced in despite being on cooldown

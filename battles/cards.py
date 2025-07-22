@@ -139,12 +139,15 @@ class BaseAttack(BaseCard):
 
         await target.targeted_by_attack()
 
-        dmg_inflicted = 1 + sum([status.multiplier for status in user.get_statuses(statuses.DamageInflictedBuff) if await status.applicable_to_card(self)])
-        dmg_received = math.prod([(1 + status.multiplier) for status in target.get_statuses(statuses.DamageReceivedBuff) if await status.applicable_to_card(self)])
+        dmg_inflicted = sum([status.multiplier for status in user.get_statuses(statuses.DamageInflictedBuff) if await status.applicable_to_card(self)])
+        dmg_received = sum([status.multiplier for status in target.get_statuses(statuses.DamageReceivedBuff) if await status.applicable_to_card(self)])
+        dmg_multiplier = dmg_inflicted + dmg_received
+        if dmg_multiplier < 0:
+            dmg_multiplier = min(dmg_multiplier + 1, 0.2)
 
         atk_stat = user.get_stat(self.atk_stat)
         def_stat = target.get_stat(self.def_stat)
-        damage = atk_stat * self.atk_multiplier * random.randint(80, 120) * dmg_inflicted * dmg_received/ (100 + def_stat * self.def_multiplier)
+        damage = atk_stat * self.atk_multiplier * random.randint(80, 120) * dmg_multiplier / (100 + def_stat * self.def_multiplier)
 
         inflicted = await target.inflict_attack_damage(int(damage), user)
         return inflicted
@@ -269,7 +272,13 @@ class HitAllAttack(BaseAttack):
         for target in [char for char in self.owner.opponent.characters if char is not self.owner.opponent.active_character]:
             atk_stat = user.get_stat(self.atk_stat)
             def_stat = target.get_stat(self.def_stat)
-            damage = atk_stat * self.atk_multiplier * self.bench_multiplier * variance * dmg_inflicted / (100 + def_stat * self.def_multiplier)
+
+            dmg_received = sum([status.multiplier for status in target.get_statuses(statuses.DamageReceivedBuff) if await status.applicable_to_card(self)])
+            dmg_multiplier = dmg_inflicted + dmg_received
+            if dmg_multiplier < 0:
+                dmg_multiplier = min(dmg_multiplier + 1, 0.2)
+
+            damage = atk_stat * self.atk_multiplier * self.bench_multiplier * variance * dmg_multiplier / (100 + def_stat * self.def_multiplier)
 
             await target.inflict_damage(damage)
 
@@ -632,7 +641,7 @@ class StatusEffect(BaseCard):
 
 @dataclass
 class Overcharge(BaseCard):
-    """Gain energy, but have  less next turn.
+    """Gain energy, but have less next turn.
     Args:
         energy (int): Amount of energy gained.
         penalty (int): Amount of energy lost next turn.
@@ -722,6 +731,59 @@ class DiscoverEffect(DiscoverEffectTemplate):
         text = await super().info_text()
         text += "\nAdd the discovered card to your hand."
         return text
+    
+@dataclass
+class SwitchCDEffect(BaseCard):
+    """Manipulate characters' switch cooldowns.
+    Args:
+        targets (str): Which characters to target. Can be 'allies', 'enemies', 'current_opponent', or 'all'.
+        count (int): Number of turns to add to the target(s) switch cooldown. Negative values reduce the cooldown.
+    """
+    targets: str
+    count: int
+
+    async def resolve(self):
+
+        match self.targets:
+            case 'allies':
+                targets = self.owner.get_characters()
+            case 'enemies':
+                targets = self.owner.opponent.get_characters()
+            case 'current_opponent':
+                targets = [self.owner.opponent.active_character]
+            case 'all':
+                targets = self.owner.get_characters() + self.owner.opponent.get_characters()
+            case _:
+                targets = []
+        
+        for target in targets:
+            await target.modify_switch_cooldown(self.count)
+
+    async def info_text(self):
+
+        if self.count > 0:
+            type_of_change = 'Increase'
+        else:
+            type_of_change = 'Reduce'
+
+        match self.targets:
+            case 'allies':
+                targets = "all ally"
+            case 'enemies':
+                targets = "all enemy"
+            case 'current_opponent':
+                targets = "the opponent's"
+            case 'all':
+                targets = "all characters'"
+            case _:
+                targets = "[Target missing. If you see this, submit a bug report.]"
+
+        text = f"{type_of_change} {targets} switch cooldown{'s' if self.targets != 'current_opponent' else ''} by **{abs(self.count)}**."
+
+        # Add parent information if there is any (conditions, keywords etc.) then return the full string
+        extra = await super().info_text()
+        return f"{extra}\n{text}" if extra else text
+
 
 @dataclass
 class TitanShift(BaseCard):
@@ -801,6 +863,7 @@ class Cards(Enum):
     TWIN_SLASH = MultiHitAttack('Twin Slash', 'uncommon', 2, 'atk', 'def', 'physical', 1, 1, 2, filename="twinslash.jpg")
     HEMOMANCY = HurtSelfAttack('Hemomancy', 'uncommon', 1, 'm.a', 'm.d', 'magic', 1.75, 1, 0.15, 'max_health', filename="hemomancy.jpg")
     SCRYING_TOME = DiscoverEffect('Scrying Tome', 'uncommon', 1, 5, 'deck', filename="scryingtome.jpg")
+    MAGICAL_CLOCK = SwitchCDEffect("Magical Clock", "uncommon", 1, "allies", -3)
 
     SNOWBALL_SPELL = GainPowerAttack('Snowball Spell', 'rare', 1, 'm.a', 'm.d', 'magic', 1, 1, 1, tags=('projectile',), filename="snowballspell.jpg")
     OVERCHARGE = Overcharge('Overcharge', 'rare', 0, 1, 2, revealed=2, keywords=['revealed'], filename="overcharge.jpg")

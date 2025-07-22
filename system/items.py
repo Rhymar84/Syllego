@@ -22,6 +22,7 @@ ITEMS = {
     "emberblossom_seed": {
         "name": "Emberblossom Seed",
         "description": "Can be grown in the AIO Farming Unit.",
+        "emoji": "<:emberblossom_seed:1382774336468942910>",
         "farming_grow": {
             "time": 60,
             "loot_table": (
@@ -35,7 +36,8 @@ ITEMS = {
 
     "emberblossom": {
         "name": "Emberblossom",
-        "description": "A small flower that emits hot motes."
+        "description": "A small flower that emits hot motes.",
+        "emoji": "<:emberblossom:1382774333486665738>"
     },
 
 
