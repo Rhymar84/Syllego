@@ -8,6 +8,7 @@ import aiosqlite
 import config
 from system.character_database import CHARACTERS, BaseChar, get_party_image
 from battles.characters import FIGHTERS
+from system.emoji import EMOJIS
 from time import perf_counter
 from PIL import Image
 from io import BytesIO
@@ -24,149 +25,119 @@ shining_colour = 0xf7c01d
 glowing_colour = 0xb32bb6
 common_colour = 0xc9f2c9
 
-shining_emoji = '<:shining:1105901981299638343>'
-glowing_emoji = '<:glowing:1105937849976631417>'
-common_emoji = '<:common:1105901985024192642>'
-special_emoji = '<:special:1107411921201799238>'
-
-
-#######################################################################################
-
-common_characters = ['Asahina Nazuna', 'Sakura Airi', 'Ibuki Mio', 'Ike Kanji', 'Hasebe Haruka', 'Miyake Akito', 'Yukimura Keisei', 'Satō Maya', 'Shinohara Satsuki', 'Sotomura Hideo', 'Amikura Mako', 'Shiranami Chihiro', 'Himeno Yuki', 'Sakagami Kazuma', 'Mashima Tomonari', 'Totsuka Yahiko', 'Kamuro Masumi', 'Hashimoto Masayoshi', 'Kitō Hayato', 'Yamamura Miki', 'Tachibana Akane', 'Shibata Sō', 'Ishizaki Daichi', 'Tsubaki Sakurako', 'Yamauchi Haruki']
-glowing_characters = ['Karuizawa Kei', 'Hirata Yōsuke', 'Sudō Ken', 'Chabashira Sae', 'Kanzaki Ryuji', 'Hoshinomiya Chie', 'Yamada Albert', 'Shiina Hiyori', 'Hōsen Kazuomi', 'Nanase Tsubasa', 'Matsushita Chiaki', 'Kaneda Satoru', 'Wang Meiyu', 'Utomiya Riku', 'Ishigami Kyō', 'Katsuragi Kōhei', 'Ayanokōji Atsuomi', 'Sakayanagi Narumori', 'Tsukishiro Tokinari', 'False Ayanokōji Kiyotaka', 'Shizuku']
-shining_characters = ['Ayanokōji Kiyotaka', 'Horikita Suzune', 'Ichinose Honami', 'Sakayanagi Arisu', 'Kushida Kikyō', 'Ryūen Kakeru', 'Horikita Manabu', 'Kōenji Rokusuke', 'Yagami Takuya', 'Nagumo Miyabi', 'Amasawa Ichika', 'Kiryūin Fūka', 'True Kushida Kikyō', 'Delinquent Ishizaki Daichi']
-special_characters = ['Shiba Katsunori', 'Shiro', 'Perfect Kōenji Rokusuke']
-
-POOL_BASE_COMMON = ['Asahina Nazuna', 'Sakura Airi', 'Ibuki Mio', 'Ike Kanji', 'Hasebe Haruka', 'Miyake Akito', 'Yukimura Keisei', 'Satō Maya', 'Shinohara Satsuki', 'Sotomura Hideo', 'Amikura Mako', 'Shiranami Chihiro', 'Himeno Yuki', 'Sakagami Kazuma', 'Mashima Tomonari', 'Totsuka Yahiko', 'Kamuro Masumi', 'Hashimoto Masayoshi', 'Kitō Hayato', 'Yamamura Miki', 'Tachibana Akane', 'Shibata Sō', 'Ishizaki Daichi', 'Tsubaki Sakurako', 'Yamauchi Haruki']
-POOL_BASE_GLOWING = ['Karuizawa Kei', 'Hirata Yōsuke', 'Sudō Ken', 'Chabashira Sae', 'Kanzaki Ryuji', 'Hoshinomiya Chie', 'Yamada Albert', 'Shiina Hiyori', 'Hōsen Kazuomi', 'Nanase Tsubasa', 'Matsushita Chiaki', 'Kaneda Satoru', 'Wang Meiyu', 'Utomiya Riku', 'Ishigami Kyō', 'Katsuragi Kōhei', 'Ayanokōji Atsuomi', 'Sakayanagi Narumori', 'Tsukishiro Tokinari']
-POOL_BASE_SHINING = ['Ayanokōji Kiyotaka', 'Horikita Suzune', 'Ichinose Honami', 'Sakayanagi Arisu', 'Kushida Kikyō', 'Ryūen Kakeru', 'Horikita Manabu', 'Kōenji Rokusuke', 'Yagami Takuya', 'Nagumo Miyabi', 'Amasawa Ichika', 'Kiryūin Fūka']
-
+active_wishes = []
 
 ########################################################################################
 
 
 
-class Spin(discord.ui.View):
-    def __init__(self, original_interaction: discord.Interaction, character: BaseChar):
-        super().__init__()
-        self.original_interaction = original_interaction
+
+class Wish():
+
+    def __init__(self, interaction: discord.Interaction, character: BaseChar):
+        self.interaction = interaction
         self.character = character
-        self.character_level = 0
-        self.is_new = False
-        self.timeout = 180
+        self.is_dupe: bool = False
 
-    @discord.ui.button(emoji='<:claim:1149647515063439380>', style=discord.ButtonStyle.grey)
-    async def summon_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.is_finished():
-            await interaction.response.defer()
-            return
-        if interaction.user != self.original_interaction.user:
-            embed = discord.Embed(title='Error', description='This is not your spin!', color=config.ErrorColour)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        
-        starpower = await get_starpower(interaction.user)
-        
-        if starpower < 50:
-            embed = discord.Embed(title='Not Enough Starpower :(', description=f'Your summons cost 50% Starpower, but you only have **{starpower}%**. Starpower recharges at a rate of 20%/h.', color=config.ErrorColour)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
+    async def start(self):
+        user = self.interaction.user
+        active_wishes.append(user)
 
-        char_level = await give_character(interaction.user, self.character.id)
-        await set_starpower(interaction.user, starpower - 50)
-        await set_last_starpower_update(interaction.user, dt.datetime.now())
+        animation = await self.build_animation()
+        embed, file = await self.create_embed(animation) 
 
-        self.character_level = char_level
-        if char_level == 1:
-            self.is_new = True
+        await self.interaction.followup.send(embed=embed, file=file)
+        await asyncio.sleep(5) # Wait 5 seconds on the wish animation to build suspense
+        active_wishes.pop(active_wishes.index(user))
+        await self.reveal_character()
+        await give_character(user, self.character.id)
+        await add_starpower(self.interaction.user, -100)
 
-        await self.claim(interaction)
 
+
+    async def build_animation(self) -> dict:
+        rarity = self.character.rarity
+
+        hint_tables = {
+            "common": {
+                "sky": {"blue": 0.75, "purple": 0.2, "gold": 0.05, "green": 0},
+                "star": {"none": 0.2, "shooting_star": 0.7, "comet": 0.1, "meteors": 0},
+                "celestial": {"none": 0.4, "moon": 0.4, "constellation": 0.19, "planet": 0.01}
+            },
+            "glowing": {
+                "sky": {"blue": 0.5, "purple": 0.35, "gold": 0.15, "green": 0 if self.is_dupe else 0.05},
+                "star": {"none": 0, "shooting_star": 0.5, "comet": 0.5, "meteors": 0},
+                "celestial": {"none": 0.2, "moon": 0.45, "constellation": 0.3, "planet": 0.05}
+            },
+            "shining": {
+                "sky": {"blue": 0.25, "purple": 0.5, "gold": 0.25, "green": 0 if self.is_dupe else 0.2},
+                "star": {"none": 0, "shooting_star": 0.3, "comet": 0.45, "meteors": 0.25},
+                "celestial": {"none": 0.1, "moon": 0.25, "constellation": 0.45, "planet": 0.3}
+            },
+            "mythical": {
+                "sky": {"blue": 0.1, "purple": 0.3, "gold": 0.6, "green": 0 if self.is_dupe else 0.35},
+                "star": {"none": 0, "shooting_star": 0.1, "comet": 0.4, "meteors": 0.5},
+                "celestial": {"none": 0, "moon": 0.2, "constellation": 0.3, "planet": 0.5}
+            }
+        }
+
+        animation = {}
+        for hint_type, options in hint_tables[rarity].items():
+            animation[hint_type] = random.choices(list(options.keys()), list(options.values()))[0]
+
+        return animation
+
+    async def create_embed(self, animation: dict):
+
+        embed = discord.Embed(title=f"{self.interaction.user.display_name} is making a wish...", color=0xe4ede6)
+        embed.set_author(name = self.interaction.user.display_name, icon_url=f'{self.interaction.user.display_avatar}')
+
+        base: Image.Image = Image.open(f"Assets/Wishes/sky_{animation['sky']}.png")
+
+        if animation['star'] != "none":
+            star = Image.open(f"Assets/Wishes/{animation['star']}.png")
+            base.paste(star, (20, 35), star)
+
+        if animation['celestial'] != "none":
+            celestial = Image.open(f"Assets/Wishes/{animation['celestial']}.png")
+            base.paste(celestial, (355, 130), celestial)
+
+        with BytesIO() as image_binary:
+            party_image = base.convert('RGB')
+            party_image.save(image_binary, 'JPEG')
+            image_binary.seek(0)
+            file = discord.File(fp=image_binary, filename='wish.jpeg')
+            embed.set_image(url='attachment://wish.jpeg')
+
+
+        return embed, file
     
+    async def reveal_character(self):
 
-    async def create(self):
+        embed = await self.character.display(1, config.RARITY_COLOUR_KEY[self.character.rarity], is_new=not self.is_dupe)
+        if self.is_dupe:
+            await self.display_dust_conversion(embed)
 
-        self.character_level = await get_character_level(self.original_interaction.user, self.character.id)
-        if self.character_level >= 5:
-            self.remove_item(self.summon_button)
-            self.add_item(TakeJarButton(self.original_interaction, self.character, self.character_level))
+        extension = "gif" if self.character.rarity == "mythical" else "jpg"
 
-
-        embed = await self.character.display(self.character_level, get_rarity_colour(self.character.rarity))
-
-        portrait = discord.File(f'Assets/Portraits/{self.character.id}.jpg', filename='portrait.jpg')
-        embed.set_image(url=f'attachment://portrait.jpg')
-        embed.set_author(name=f'{self.original_interaction.user.display_name}', icon_url=f'{self.original_interaction.user.display_avatar}')
-        
-        remaining_spins = await get_remaining_spins(self.original_interaction.user)
-        await set_remaining_spins(self.original_interaction.user, remaining_spins - 1)
-        try:
-            await self.original_interaction.response.send_message(embed=embed, file=portrait, view=self)
-        except Exception as e:
-            remaining_spins = await get_remaining_spins(self.original_interaction.user)
-            await set_remaining_spins(self.original_interaction.user, remaining_spins + 1)
-            raise e
-
-
-
-    async def claim(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        self.stop()
-
-        embed = await self.character.display(self.character_level, 0xb71010, self.is_new)
-
-        portrait = discord.File(f'Assets/Portraits/{self.character.id}.jpg', filename='portrait.jpg')
-        embed.set_image(url=f'attachment://portrait.jpg')
-        embed.set_author(name=f'{interaction.user.display_name}', icon_url=f'{interaction.user.display_avatar}')
-
-        await interaction.edit_original_response(embed=embed, attachments=[portrait], view=None)
-
-        channel = interaction.channel
-        await channel.send(f'**{interaction.user.display_name}** made an offering to the stars, and was gifted **{self.character.name}**.')
-
-
-
-class TakeJarButton(discord.ui.Button):
+        portrait = discord.File(f'Assets/Portraits/{self.character.id}.{extension}', filename=f'portrait.{extension}')
+        embed.set_image(url=f'attachment://portrait.{extension}')
+        embed.set_author(name=f'{self.interaction.user.display_name}', icon_url=f'{self.interaction.user.display_avatar}')
     
-    def __init__(self, original_interaction: discord.Interaction, character: BaseChar, level: int, *, style = discord.ButtonStyle.grey, label = None, disabled = False, custom_id = None, url = None, emoji = None, row = None, sku_id = None):
-        super().__init__(style=style, label=label, disabled=disabled, custom_id=custom_id, url=url, emoji='✨', row=row, sku_id=sku_id)
-        self.original_interaction = original_interaction
-        self.character = character
-        self.character_level = level
+        await self.interaction.edit_original_response(embed=embed, attachments=[portrait])
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user == self.original_interaction.user:
-            return True
-        await interaction.response.send_message(ephemeral=True, embed=discord.Embed(description='This is not your spin!', color=config.ErrorColour))
-        return False
-    
-    async def callback(self, interaction: discord.Interaction):
-
-        starpower = await get_starpower(interaction.user)
+    async def display_dust_conversion(self, embed: discord.Embed):
+        match self.character.rarity:
+            case "common":
+                currency = "Green Dust"
+            case "glowing": 
+                currency = "Purple Dust"
+            case "shining":
+                currency = "Gold Dust"
+            case "mythical":
+                currency = "Rainbow Dust"
         
-        if starpower < 50:
-            embed = discord.Embed(title='Not Enough Starpower :(', description=f'Your summons cost 50% Starpower, but you only have **{starpower}%**. Starpower recharges at a rate of 20%/h.', color=config.ErrorColour)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        await set_starpower(interaction.user, starpower - 50)
-        await set_last_starpower_update(interaction.user, dt.datetime.now())
-
-        jars_gained = 1 if self.character.rarity == 1 else 3 if self.character.rarity == 2 else 10
-        await gain_jars(interaction.user, jars_gained)
-
-        embed = await self.character.display(self.character_level, 0x710ddb)
-
-        portrait = discord.File(f'Assets/Portraits/{self.character.id}.jpg', filename='portrait.jpg')
-        embed.set_image(url=f'attachment://portrait.jpg')
-        embed.set_author(name=f'{interaction.user.display_name}', icon_url=f'{interaction.user.display_avatar}')
-
-        await interaction.response.edit_message(embed=embed, attachments=[portrait], view=None)
-
-        channel = interaction.channel
-        await channel.send(f'**{interaction.user.display_name}** made an offering to the stars, and captured **{jars_gained}** Star in a Jar{"s"[:(jars_gained)^1]}.')
+        embed.description = f"{self.character.name} was converted into 10 **{currency}**."
 
 
 
@@ -232,7 +203,7 @@ class PartyObject():
             file = discord.File(fp=image_binary, filename='party.jpeg')
             embed.set_image(url='attachment://party.jpeg')
             embed.set_author(name=f'{self.member.display_name}\'s Party', icon_url=f'{self.member.display_avatar}')
-            embed.set_footer(text=f'Use /add to edit a party slot.')
+            embed.set_footer(text=f'Use /party add to edit a party slot.')
 
         return embed, file
 
@@ -240,24 +211,36 @@ class PartyObject():
 
 ########################################################################################
 
+async def seocnds_since_last_spin(member: discord.Member) -> int:
 
-async def check_last_starpower_update(member: discord.Member) -> dt.datetime:
+    # Get number of seconds since last spin
+    last_spin = await check_last_spin(member)
+    now = dt.datetime.now()
+    difference = now - last_spin
+    seconds = difference.total_seconds()
+
+    return seconds
+
+
+async def check_last_spin(member: discord.Member) -> dt.datetime:
 
     async with aiosqlite.connect("databases/gacha.sqlite") as db:
         async with db.cursor() as cursor:
-            await cursor.execute(f'SELECT last_starpower_update FROM misc WHERE user_id = {member.id}')
+            await cursor.execute(f'SELECT last_spin FROM misc WHERE user_id = {member.id}')
             last_update = await cursor.fetchone()
 
-    if not last_update:
+    if not last_update or not last_update[0]:
+        if not last_update:
+            await insert_user_record("gacha", "misc", member)
         last_update = ('24-09-2003 00:00',)
 
     return dt.datetime.strptime(last_update[0], "%d-%m-%Y %H:%M")
 
-async def set_last_starpower_update(member: discord.Member, time: dt.datetime):
+async def set_last_spin(member: discord.Member, time: dt.datetime):
 
     async with aiosqlite.connect("databases/gacha.sqlite") as db:
         async with db.cursor() as cursor:
-            sql = (f'UPDATE misc SET last_starpower_update = ? WHERE user_id = ?')
+            sql = (f'UPDATE misc SET last_spin = ? WHERE user_id = ?')
             val = (time.strftime("%d-%m-%Y %H:%M"), member.id)
             await cursor.execute(sql, val)
 
@@ -279,73 +262,55 @@ async def set_starpower(member: discord.Member, amount: int):
 
 async def get_starpower(member: discord.Member) -> int:
 
-    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+    async with aiosqlite.connect("databases/eco.sqlite") as db:
         async with db.cursor() as cursor:
-            await cursor.execute(f'SELECT starpower FROM misc WHERE user_id = {member.id}')
+            await cursor.execute(f'SELECT starpower FROM currencies WHERE user_id = {member.id}')
             starpower = await cursor.fetchone()
-
-    starpower = starpower[0]
-
-    if not starpower:
-        starpower = 0
-
-    # Get number of seconds since last starpower update
-    last_update = await check_last_starpower_update(member)
-    now = dt.datetime.now()
-    difference = now - last_update
-    seconds = difference.total_seconds()
-
-    # If starpower is full return 100
-    if starpower >= 100 or starpower is None:
-        return 100
     
-    # Every 3 minutes = 1 starpower, so if less than 3 minutes have passed since last check don't add any
-    if seconds < 180:
-        return starpower
-
-    # Get starpower recharged
-    missing_starpower = 100 - starpower
-    recharged_starpower = int(seconds / 180)
-
-    # If 5 minutes have passed, last update should be offset by 2 minutes so that those minutes aren't lost.
-    leftover = seconds - (180 * recharged_starpower)
-    leftover = dt.timedelta(seconds=leftover)
+    return starpower[0] if starpower is not None and starpower[0] is not None else 0
 
 
-    await set_last_starpower_update(member, now-leftover)
+async def add_starpower(member: discord.Member, amount: int) -> int:
 
-    if recharged_starpower > missing_starpower:
-        recharged_starpower = missing_starpower
+    current_starpower = await get_starpower(member)
+    new_starpower = max(current_starpower + amount, 0)
 
-    await set_starpower(member, starpower + recharged_starpower)
-    
-    return starpower + recharged_starpower
-
-
-async def get_remaining_spins(member: discord.Member) -> int:
-
-    async with aiosqlite.connect("databases/gacha.sqlite") as db:
+    async with aiosqlite.connect("databases/eco.sqlite") as db:
         async with db.cursor() as cursor:
-            await cursor.execute(f'SELECT spins_left FROM misc WHERE user_id = {member.id}')
-            spins_left = await cursor.fetchone()
-    
-    spins_left = spins_left[0]
-
-    if spins_left is None:
-        spins_left = 10
-
-    return spins_left
-
-async def set_remaining_spins(member: discord.Member, amount: int):
-
-    async with aiosqlite.connect("databases/gacha.sqlite") as db:
-        async with db.cursor() as cursor:
-            sql = (f'UPDATE misc SET spins_left = ? WHERE user_id = ?')
-            val = (amount, member.id)
+            sql = (f'UPDATE currencies SET starpower = ? WHERE user_id = ?')
+            val = (new_starpower, member.id)
             await cursor.execute(sql, val)
 
         await db.commit()
+
+    return new_starpower
+
+
+async def get_currency(member: discord.Member, currency: str) -> int:
+
+    async with aiosqlite.connect("databases/eco.sqlite") as db:
+        async with db.cursor() as cursor:
+            await cursor.execute(f'SELECT {currency} FROM currencies WHERE user_id = {member.id}')
+            value = await cursor.fetchone()
     
+    return value[0] if value is not None and value[0] is not None else 0
+
+
+async def add_currency(member: discord.Member, currency: str, amount: int) -> int:
+
+    current_value = await get_currency(member, currency)
+    new_value = max(current_value + amount, 0)
+
+    async with aiosqlite.connect("databases/eco.sqlite") as db:
+        async with db.cursor() as cursor:
+            sql = (f'UPDATE currencies SET {currency} = ? WHERE user_id = ?')
+            val = (new_value, member.id)
+            await cursor.execute(sql, val)
+
+        await db.commit()
+
+    return new_value
+
 
 
 async def get_collection(member: discord.Member, format: str='images') -> list:
@@ -369,7 +334,7 @@ async def get_collection(member: discord.Member, format: str='images') -> list:
     collection.pop(0)
 
     collection = [character for character in collection if character[1] is not None]
-    collection = sorted(collection, key=lambda x: get_rarity(x[0]), reverse=True)
+    collection = sorted(collection, key=lambda x: get_rarity_sort(x[0]), reverse=True)
     
     if format == 'names':
         return [CHARACTERS[character[0]].name for character in collection]
@@ -378,13 +343,14 @@ async def get_collection(member: discord.Member, format: str='images') -> list:
         return [{'character': CHARACTERS[character[0]], 'level': character[1]} for character in collection]
 
     if format == 'rarities':
-        return [f'{globals()[f"{get_rarity(character[0])}_emoji"]} {CHARACTERS[character[0]].name} **{int(await get_character_level(member, character[0]))}**⭐' for character in collection]
+        return [f'{EMOJIS[CHARACTERS[character[0]].rarity]} {CHARACTERS[character[0]].name} **{int(await get_character_level(member, character[0]))}**⭐' for character in collection]
     
     embeds = []
     files = []
 
     for index, character in enumerate(collection):
         id = character[0]
+        rarity = CHARACTERS[id].rarity
         level = character[1]
 
         embed: discord.Embed = await CHARACTERS[id].display(level, 0xb71010)
@@ -395,7 +361,7 @@ async def get_collection(member: discord.Member, format: str='images') -> list:
         embed.set_author(name=f'{member.display_name}', icon_url=f'{member.display_avatar}')
         
         embeds.append(embed)
-        files.append(id)
+        files.append(f"{id}.{'gif' if rarity == 'mythical' else 'jpg'}")
 
     return embeds, files
 
@@ -419,68 +385,67 @@ async def verify_collection(member: discord.Member, insert_if_missing: bool = Tr
         
     return True
 
-async def get_wish(member: discord.Member) -> str:
 
-    async with aiosqlite.connect("databases/gacha.sqlite") as db:
-        async with db.cursor() as cursor:
-            await cursor.execute(f'SELECT wish FROM misc WHERE user_id = {member.id}')
-            wish = await cursor.fetchone()
-
-    return wish[0]
+async def do_wish(interaction: discord.Interaction):
 
 
-async def set_wish(member: discord.Member, wish: str) -> str:
+    pull = do_pull()
 
-    async with aiosqlite.connect("databases/gacha.sqlite") as db:
-        async with db.cursor() as cursor:
+    wish = Wish(interaction, pull)
+    if await get_character_level(interaction.user, pull.id) > 0:
+        wish.is_dupe = True
 
-            if wish is None:
-                sql = f'UPDATE misc SET wish = null WHERE user_id = ?'
-                val = (member.id,)
-            else:
-                sql = f'UPDATE misc SET wish = ? WHERE user_id = ?'
-                val = (wish, member.id)
+    await wish.start()
 
-            await cursor.execute(sql, val)
-        await db.commit()
-
-
-async def do_spin(member: discord.Member):
     
 
-    # 10% chance to guarantee a character from wished series 
-    wish = await get_wish(member)
-    if wish is not None:
-        wish_chance = 0.1
-        wish_roll = random.random()
-        if wish_roll > wish_chance:
-            wish = None
+def do_pull() -> BaseChar:
 
-    shining_chance = 0.02
-    glowing_chance = 0.1
+    # Pull odds
+    mythical_rate = 0.001
+    shining_rate = 0.025
+    glowing_rate = 0.33
+
     roll = random.random()
-
-    if roll <= shining_chance:
-        rarity = 3
-    elif roll <= shining_chance + glowing_chance:
-        rarity = 2
+    if roll <= mythical_rate:
+        rarity = "mythical"
+    elif roll <= shining_rate:
+        rarity = "shining"
+    elif roll <= glowing_rate:
+        rarity = "glowing"
     else:
-        rarity = 1
+        rarity = "common"
 
-    pool = get_pool(rarity, wish)
-    pull = random.choice(pool)
-
-    return pull
+    pool = get_pool(rarity)
+    return random.choice(pool)
 
 
 
+async def do_spin(interaction: discord.Interaction):
+
+    reward = random.choices(list(config.SPIN_OPTIONS.keys()), list(config.SPIN_OPTIONS.values()))[0]
+    item_reward = random.choices(list(config.SPIN_ITEM_OPTIONS.keys()), list(config.SPIN_ITEM_OPTIONS.values()))[0]
+
+    embed = discord.Embed(description=f"You have obtained **{reward}** starpower!", color=0x0ffc03)
+    embed.set_thumbnail(url="https://media.tenor.com/BBhMdyHEhMMAAAAM/spinning.gif")
+    embed.set_author(name = interaction.user.display_name, icon_url=f'{interaction.user.display_avatar}')
+    embed.set_footer(text=f"You can spin again in 8 hours.")
+
+    if item_reward:
+        from system.items import ITEMS
+        embed.description += f"\nYou have obtained a{'n' if ITEMS[item_reward]['name'][0] in ['a','e','i','o','u'] else ''} **{ITEMS[item_reward]['name']}**!"
+        await gain_item(interaction.user, item_reward, 1)
+
+    await add_starpower(interaction.user, reward)
+    await set_last_spin(interaction.user, dt.datetime.now())
+    await interaction.followup.send(embed=embed)
 
 
 
 async def get_series_progress(member: discord.Member, series: str) -> dict:
 
     char_list = [x for x in CHARACTERS.values() if x.series == series]
-    char_list = {x: 0 for x in sorted(char_list, key=lambda x: get_rarity(x.id), reverse=True)}
+    char_list = {x: 0 for x in sorted(char_list, key=lambda x: get_rarity_sort(x.id), reverse=True)}
 
     collected: list[dict] = await get_collection(member, format='objects')
     collected = [x for x in collected if x['character'].series == series]
@@ -493,29 +458,33 @@ async def get_series_progress(member: discord.Member, series: str) -> dict:
 
 
 def get_rarity(character: str):
-    rarity = CHARACTERS[character].rarity
-    return 'shining' if rarity == 3 else 'glowing' if rarity == 2 else 'common'
+    return CHARACTERS[character].rarity
+
+def get_rarity_sort(character: str):
+    rarity = get_rarity(character)
+
+    match rarity:
+        case "common":
+            return 0
+        case "glowing":
+            return 1
+        case "shining":
+            return 2
+        case "mythical":
+            return 3
 
 def get_rarity_emoji(rarity: int):
-
-    if rarity == 3:
-        return shining_emoji
-    
-    if rarity == 2:
-        return glowing_emoji
-    
-    if rarity == 1:
-        return common_emoji
+    return EMOJIS[rarity]
     
 def get_rarity_colour(rarity: int):
 
-    if rarity == 3:
+    if rarity == "shining":
         return shining_colour
     
-    if rarity == 2:
+    if rarity == "glowing":
         return glowing_colour
     
-    if rarity == 1:
+    if rarity == "common":
         return common_colour
 
 async def get_character_level(member: discord.Member, id: str):
@@ -529,7 +498,7 @@ async def get_character_level(member: discord.Member, id: str):
             level = await cursor.fetchone()
 
 
-    level = level[0]
+    level = level[0] if level is not None else 0
     
     if level is None:
         level = 0
@@ -541,24 +510,18 @@ async def get_character_level(member: discord.Member, id: str):
 
 async def give_character(member: discord.Member, character: str) -> float:
 
-    level = await get_character_level(member, character)
-    
-    if level == 0:
-        newLevel = 1
-    elif level >= 5:
-        newLevel = 5
-    else:
-        newLevel = level + 1
+    if await get_character_level(member, character) > 0:
+        currency = config.RARITY_DUST_CONVERSION[CHARACTERS[character].rarity]
+        await add_currency(member, currency, 10)
+        return
 
     async with aiosqlite.connect("databases/gacha.sqlite") as db:
         async with db.cursor() as cursor:
-            sql = (f'UPDATE collection SET "{character}" = ? WHERE user_id = ?')
-            val = (newLevel, member.id)
+            sql = (f'UPDATE collection SET "{character}" = 1 WHERE user_id = ?')
+            val = (member.id,)
             await cursor.execute(sql, val)
 
         await db.commit()
-
-    return newLevel
 
 
 async def get_party(member: discord.Member):
@@ -595,7 +558,7 @@ async def edit_slot(member: discord.Member, slot: str, character: str):
                     await cursor.execute(sql, val) 
 
 
-            sql = (f'UPDATE party SET {slot} = ? WHERE user_id = ?')
+            sql = (f'UPDATE party1 SET {slot} = ? WHERE user_id = ?')
             val = (character, member.id)
             await cursor.execute(sql, val)
         
@@ -626,11 +589,8 @@ async def clearParty(member: discord.Member):
 
 
 
-def get_pool(rarity: int, series: str | None) -> list[BaseChar]:
-    pool = [character for character in CHARACTERS.values() if character.rarity == rarity]
-    if series:
-        pool = [character for character in pool if character.series == series]
-    return pool
+def get_pool(rarity: str) -> list[BaseChar]:
+    return [character for character in CHARACTERS.values() if character.rarity == rarity]
 
 async def get_jars(member: discord.Member, insert_if_none: bool=False):
     
@@ -859,7 +819,7 @@ async def get_item_obtaining_string(item: str) -> str:
         return ''
     
     text = f"\n\n**Obtaining**\n"
-    farming_sources_strings = [f"- {ITEMS[x['input_item']]['name']} {farming.FARMING_MODE_MAP[x['mode']]}➡️ {ITEMS[item]['name']} x{x['output_quantity']}" for x in farming_sources]
+    farming_sources_strings = [f"- **{config.blue(ITEMS[x['input_item']]['name'])}** {farming.FARMING_MODE_MAP[x['mode']]}➡️ **{config.blue(ITEMS[item]['name'])}** x**{x['output_quantity']}**" for x in farming_sources]
 
     text += "\n".join(farming_sources_strings)
 

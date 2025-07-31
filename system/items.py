@@ -22,7 +22,6 @@ ITEMS = {
     "emberblossom_seed": {
         "name": "Emberblossom Seed",
         "description": "Can be grown in the AIO Farming Unit.",
-        "emoji": "<:emberblossom_seed:1382774336468942910>",
         "farming_grow": {
             "time": 60,
             "loot_table": (
@@ -36,8 +35,7 @@ ITEMS = {
 
     "emberblossom": {
         "name": "Emberblossom",
-        "description": "A small flower that emits hot motes.",
-        "emoji": "<:emberblossom:1382774333486665738>"
+        "description": "A small flower that emits hot motes."
     },
 
 
@@ -95,7 +93,7 @@ ITEMS = {
 
     "rockroot": {
         "name": "Rockroot",
-        "description": "A sturdy flower made entirely of minerals."
+        "description": "A sturdy plant able to thrive in almost any conditions."
     },
 
     "minature_phoenix": {
@@ -275,12 +273,127 @@ ITEMS = {
         "description": "This mysterious object shines with four distinct lights. It seems to have a deep connection with the world..."
     },
 
-    
+    "prismatic_seed": {
+        "name": "Prismatic Seed",
+        "description": "A multi-coloured seed.",
+        "farming_grow": {
+            "time": 120,
+            "loot_table": (
+                {
+                    "chance": 1,
+                    "loot": {"prismatic_plant": 1}
+                },
+            )
+        }
+    },
 
+    "prismatic_plant": {
+        "name": "Prismatic Plant",
+        "description": "The petals of this flower each glow with a different colour."
+    },
 
+    "dragon": {
+        "name": "Dragon",
+        "description": "A young adult dragon! It won't eat you. Probably.",
+        "farming_harvest": {
+            "time": 120,
+            "loot_table": (
+                {
+                    "chance": 1,
+                    "loot": {"dragon_wings": 1}
+                },
+            )
+        },
+        "farming_extract": {
+            "time": 120,
+            "loot_table": (
+                {
+                    "chance": 1,
+                    "loot": {"dragon_breath": 1}
+                },
+            )
+        }
+    },
 
+    "dragon_breath": {
+        "name": "Dragon's Breath",
+        "description": "The fiery breath of a dragon."
+    },
 
+    "dragon_wings": {
+        "name": "Dragon's Wings",
+        "description": "The wings of a dragon."
+    },
 
+    "mythril_chunk": {
+        "name": "Mythril Chunk",
+        "description": "A fused chunk of various metals. It seems greater than the sum of its parts.",
+        "farming_extract": {
+            "time": 120,
+            "loot_table": (
+                {
+                    "chance": 1,
+                    "loot": {"mythril_ingot": 1}
+                },
+            )
+        }
+    },
 
+    "mythril_ingot": {
+        "name": "Mythril Ingot",
+        "description": "This material is unlike any found naturally underground..."
+    },
+
+    "spirit_fountain": {
+        "name": "Spirit Fountain",
+        "description": "An elegant fountain. Apparently, submerging one's body in it soothes the soul.",
+        "farming_extract": {
+            "time": 120,
+            "loot_table": (
+                {
+                    "chance": 0.3,
+                    "loot": {"holy_water": 2}
+                },
+                {
+                    "chance": 0.7,
+                    "loot": {"holy_water": 1}
+                },
+            )
+        }
+    },
+
+    "holy_water": {
+        "name": "Holy Water",
+        "description": "This water is blessed by divine spirits. It seems to shine when you look into it."
+    },
+
+    "senzu_bean": {
+        "name": "Senzu Bean",
+        "description": "A divine bean grown on Korin's tower. It possesses increadible regenerative and boosting properties."
+    },
+
+    "ghostly_knight": {
+        "name": "Ghostly Knight",
+        "description": "This hollow set of armor is possessed by a ghost. Spooky.",
+        "farming_harvest": {
+            "time": 150,
+            "loot_table": (
+                {
+                    "chance": 1,
+                    "loot": {"broken_sword": 1}
+                },
+            )
+        }
+    },
+
+    "broken_sword": {
+        "name": "Broken Sword",
+        "description": "This once-pristine blade is now shattered at the hilt."
+    },
+
+    "cursed_tool": {
+        "name": "Cursed Tool",
+        "description": "A sharp knife with black fur around its guard. Ideal for exorcising curses!"
+    },
 
 }

@@ -2,15 +2,17 @@ import PIL, io
 import PIL.Image
 import discord, config
 from inspect import cleandoc
+from system.emoji import EMOJIS
 
 class BaseChar():
 
-    def __init__(self, id: str, name: str, rarity: int, series: str, short_name: str | None = None, boost_item: str | None = None):
+    def __init__(self, id: str, name: str, rarity: str, series: str, short_name: str | None = None, boost_item: str | None = None, alternate_forms: tuple = ()):
         self.id = id
         self.name = name
         self.rarity = rarity
         self.series = series
         self.boost_item = boost_item
+        self.alternate_forms = alternate_forms
         
         if short_name:
             self.short_name = short_name
@@ -20,11 +22,9 @@ class BaseChar():
 
     async def display(self, level: float, colour: int, is_new: bool = False) -> discord.Embed:
 
-        emoji = config.RARITY_EMOJI_KEY[self.rarity]
+        emoji = EMOJIS[self.rarity]
 
-        if level >= 5:
-            info = ''
-        elif is_new:
+        if is_new:
             info = 'NEW!!'
         else:
             info = ''
@@ -41,6 +41,13 @@ class BaseChar():
         embed.set_footer(text=series)
 
         return embed
+    
+class AltForm(BaseChar):
+    
+    def __init__(self, id: str, name: str, short_name: str | None = None, unlock_item: str | None = None):
+        base_character = CHARACTERS[id[:6]]
+        super().__init__(id, name, base_character.rarity, base_character.series, short_name=short_name)
+        self.unlock_item = unlock_item
 
 
 class CharInfo(discord.ui.View):
@@ -53,17 +60,66 @@ class CharInfo(discord.ui.View):
         self.original_interaction = original_interaction
         self.timeout = 60
 
-    @discord.ui.button(emoji='📊', style=discord.ButtonStyle.grey)
-    async def stats(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.original_interaction.user:
-            await interaction.response.send_message(embed=discord.Embed(title='User Error', description='This is not your command!', color=config.ErrorColour), ephemeral=True)
-            return
-        
-        character = FIGHTERS[self.base_char.id]
+        self.forms = [character] + [ALT_FORMS[x] for x in character.alternate_forms]
+        self.current_form = 0
+
+        if len(self.forms) == 1:
+            self.add_item(ViewStatsButton())
+        else:
+            self.add_item(ScrollButton(-1))
+            self.add_item(ViewStatsButton())
+            self.add_item(ScrollButton(1))
+
+    async def scroll_update(self, interaction: discord.Interaction):
+
+        extension = "gif" if self.base_char.rarity == "mythical" else "jpg"
+
+        embed: discord.Embed = await self.base_char.display(self.level, 0xb71010)
+        portrait = discord.File(f'Assets/Portraits/{self.base_char.id}.{extension}', filename=f'portrait.{extension}')
+        embed.set_image(url=f'attachment://portrait.{extension}')
+
+        await interaction.response.edit_message(embed=embed, attachments=[portrait], view=self)
+
+class ScrollButton(discord.ui.Button):
+
+    def __init__(self, step: int):
+        super().__init__(style=discord.ButtonStyle.grey, emoji='⬅️' if step < 0 else '➡️')
+        self.step = step
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        if interaction.user != self.view.original_interaction.user:
+            return False
+        return True
+
+    async def callback(self, interaction: discord.Interaction):
+
+        view: CharInfo = self.view
+
+        view.current_form = (view.current_form + self.step) % len(view.forms)
+        view.base_char = view.forms[view.current_form]
+
+        await view.scroll_update(interaction)
+
+
+class ViewStatsButton(discord.ui.Button):
+
+    def __init__(self):
+        super().__init__(style=discord.ButtonStyle.grey, emoji='📊')
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        if interaction.user != self.view.original_interaction.user:
+            return False
+        return True
+
+    async def callback(self, interaction):
+
+        view: CharInfo = self.view
+
+        character = FIGHTERS[view.base_char.id]
 
         attribute = character['attribute']
         growth_style = character['growth_style']
-        growth_factor = max(1, self.level) - 1
+        growth_factor = max(1, view.level) - 1
 
         stats = {'health': character['health'], 'attack': character['attack'], 'defense': character['defense'], 'magic_attack': character['magic_attack'], 'magic_defense': character['magic_defense'], 'speed': character['speed']}
         stats = apply_growth(stats, growth_style, growth_factor)
@@ -74,15 +130,15 @@ class CharInfo(discord.ui.View):
         tags = [f"**{x}**🧬" for x in character['chemistry_tags']] + character['tags']
         if tags:
             text +=f"\n\n*Tags: {', '.join(tags)}*"
-        if self.base_char.boost_item:
+        if view.base_char.boost_item:
             from system.farming import item_display_string
-            newline = '\n' if tags else ''
-            text += f"{newline}\n*Boost:*{item_display_string(self.base_char.boost_item)}**"
+            newline = '' if tags else '\n'
+            text += f"{newline}\n*Boost:* **{item_display_string(view.base_char.boost_item)}**"
 
-        embed = discord.Embed(title=f"{config.COLOUR_EMOJI_KEY[attribute]} {self.base_char.name}", description = text, color=config.CHARACTER_EMBED_COLOUR)
-        thumbnail = get_party_image(self.base_char, self.level)
+        embed = discord.Embed(title=f"{config.COLOUR_EMOJI_KEY[attribute]} {view.base_char.name}", description = text, color=config.CHARACTER_EMBED_COLOUR)
+        thumbnail = get_party_image(view.base_char, view.level)
         embed.set_thumbnail(url=f'attachment://{thumbnail.filename}')
-        embed.set_footer(text=self.base_char.series)
+        embed.set_footer(text=view.base_char.series)
 
         await interaction.response.edit_message(embed=embed, view=None, attachments=[thumbnail])
     
@@ -90,187 +146,187 @@ CHARACTERS = {
 
     # DRAGON BALL Z
 
-    "DBZ-01": BaseChar("DBZ-01", "Son Goku", 3, "Dragon Ball Z", "Goku"),
-    "DBZ-02": BaseChar("DBZ-02", "Vegeta", 3, "Dragon Ball Z"),
+    "DBZ-01": BaseChar("DBZ-01", "Son Goku", "mythical", "Dragon Ball Z", short_name="Goku", alternate_forms=("DBZ-01-1", "DBZ-01-2")),
+    "DBZ-02": BaseChar("DBZ-02", "Vegeta", "mythical", "Dragon Ball Z", alternate_forms=("DBZ-02-1", "DBZ-02-2")),
 
-    "DBZ-03": BaseChar("DBZ-03", "Son Gohan", 2, "Dragon Ball Z", "Gohan"),
-    "DBZ-04": BaseChar("DBZ-04", "Frieza", 2, "Dragon Ball Z"),
-    "DBZ-05": BaseChar("DBZ-05", "Cell", 2, "Dragon Ball Z"),
-    "DBZ-06": BaseChar("DBZ-06", "Majin Buu", 2, "Dragon Ball Z"),
-    "DBZ-07": BaseChar("DBZ-07", "Piccolo", 2, "Dragon Ball Z"),
+    "DBZ-03": BaseChar("DBZ-03", "Son Gohan", "shining", "Dragon Ball Z", short_name="Goku", alternate_forms=("DBZ-03-1", "DBZ-03-2")),
+    "DBZ-04": BaseChar("DBZ-04", "Frieza", "shining", "Dragon Ball Z", alternate_forms=("DBZ-04-1",)),
+    "DBZ-05": BaseChar("DBZ-05", "Cell", "shining", "Dragon Ball Z", alternate_forms=("DBZ-05-1",)),
+    "DBZ-06": BaseChar("DBZ-06", "Majin Buu", "shining", "Dragon Ball Z", alternate_forms=("DBZ-06-1", "DBZ-06-2")),
+    "DBZ-07": BaseChar("DBZ-07", "Piccolo", "shining", "Dragon Ball Z"),
 
-    "DBZ-08": BaseChar("DBZ-08", "Krillin", 1, "Dragon Ball Z"),
-    "DBZ-09": BaseChar("DBZ-09", "Tien", 1, "Dragon Ball Z"),
-    "DBZ-10": BaseChar("DBZ-10", "Future Trunks", 1, "Dragon Ball Z", "Future Trunks"),
-    "DBZ-11": BaseChar("DBZ-11", "Android 17", 1, "Dragon Ball Z"),
-    "DBZ-12": BaseChar("DBZ-12", "Android 18", 1, "Dragon Ball Z"),
-    "DBZ-13": BaseChar("DBZ-13", "Master Roshi", 1, "Dragon Ball Z"),
-    "DBZ-14": BaseChar("DBZ-14", "Yamcha", 1, "Dragon Ball Z"),
-    "DBZ-15": BaseChar("DBZ-15", "Trunks", 1, "Dragon Ball Z"),
-    "DBZ-16": BaseChar("DBZ-16", "Son Goten", 1, "Dragon Ball Z", "Goten"),
+    "DBZ-08": BaseChar("DBZ-08", "Krillin", "glowing", "Dragon Ball Z"),
+    "DBZ-09": BaseChar("DBZ-09", "Tien", "glowing", "Dragon Ball Z"),
+    "DBZ-10": BaseChar("DBZ-10", "Trunks", "glowing", "Dragon Ball Z", alternate_forms=("DBZ-10-1",)),
+    "DBZ-11": BaseChar("DBZ-11", "Master Roshi", "glowing", "Dragon Ball Z"),
+    "DBZ-12": BaseChar("DBZ-12", "Nappa", "glowing", "Dragon Ball Z"),
+    "DBZ-13": BaseChar("DBZ-13", "Captain Ginyu", "glowing", "Dragon Ball Z", short_name="Ginyu"),
+    "DBZ-14": BaseChar("DBZ-14", "Dabura", "glowing", "Dragon Ball Z"),
+    
+    "DBZ-15": BaseChar("DBZ-15", "Videl", "common", "Dragon Ball Z", boost_item="senzu_bean"), # These commons were given numbers out of order so that
+    "DBZ-16": BaseChar("DBZ-16", "Android 16", "common", "Dragon Ball Z", boost_item="senzu_bean"), # The androids can have their numbers matching :)
+    "DBZ-17": BaseChar("DBZ-17", "Android 17", "glowing", "Dragon Ball Z"),
+    "DBZ-18": BaseChar("DBZ-18", "Android 18", "glowing", "Dragon Ball Z"),
 
-
-
-    # Re:Zero
-
-    "RZ-01": BaseChar("RZ-01", "Subaru Natsuki", 3, "Re:Zero - Starting Life in Another World", "Subaru"),
-    "RZ-02": BaseChar("RZ-02", "Emilia", 3, "Re:Zero - Starting Life in Another World"),
-
-    "RZ-03": BaseChar("RZ-03", "Rem", 2, "Re:Zero - Starting Life in Another World"),
-    "RZ-04": BaseChar("RZ-04", "Ram", 2, "Re:Zero - Starting Life in Another World"),
-    "RZ-05": BaseChar("RZ-05", "Roswaal L Mathers", 2, "Re:Zero - Starting Life in Another World", "Roswaal"),
-    "RZ-06": BaseChar("RZ-06", "Reinhard Van Astrea", 2, "Re:Zero - Starting Life in Another World", "Reinhard"),
-    "RZ-07": BaseChar("RZ-07", "Puck", 2, "Re:Zero - Starting Life in Another World"),
-    "RZ-08": BaseChar("RZ-08", "Satella", 2, "Re:Zero - Starting Life in Another World"),
-
-    "RZ-09": BaseChar("RZ-09", "Beatrice", 1, "Re:Zero - Starting Life in Another World"),
-    "RZ-10": BaseChar("RZ-10", "Wilhelm Van Astrea", 1, "Re:Zero - Starting Life in Another World", "Wilhelm"),
-    "RZ-11": BaseChar("RZ-11", "Crusch", 1, "Re:Zero - Starting Life in Another World"),
-    "RZ-12": BaseChar("RZ-12", "Felis", 1, "Re:Zero - Starting Life in Another World"),
-    "RZ-13": BaseChar("RZ-13", "Petelgeuse Romanée-Conti", 1, "Re:Zero - Starting Life in Another World", "Petelgeuse"),
-    "RZ-14": BaseChar("RZ-14", "Julius Juuklius", 1, "Re:Zero - Starting Life in Another World", "Julius"),
-    "RZ-15": BaseChar("RZ-15", "Elsa Granhiert", 1, "Re:Zero - Starting Life in Another World", "Elsa"),
-    "RZ-16": BaseChar("RZ-16", "Garfiel Tinzel", 1, "Re:Zero - Starting Life in Another World", "Garfiel"),
-
-
-
-
-    # Attack on Titan
-
-    "AOT-01": BaseChar("AOT-01", "Eren Jaeger", 3, "Attack on Titan", "Eren"),
-    "AOT-02": BaseChar("AOT-02", "Levi Ackerman", 3, "Attack on Titan", "Levi"),
-
-    "AOT-03": BaseChar("AOT-03", "Mikasa Ackerman", 2, "Attack on Titan", "Mikasa"),
-    "AOT-04": BaseChar("AOT-04", "Armin Arlert", 2, "Attack on Titan", "Armin"),
-    "AOT-05": BaseChar("AOT-05", "Reiner Braun", 2, "Attack on Titan", "Reiner"),
-    "AOT-06": BaseChar("AOT-06", "Zeke Jaeger", 2, "Attack on Titan", "Zeke"),
-    "AOT-07": BaseChar("AOT-07", "Erwin Smith", 2, "Attack on Titan", "Erwin"),
-    "AOT-08": BaseChar("AOT-08", "Hange Zoe", 2, "Attack on Titan", "Hange"),
-
-    "AOT-09": BaseChar("AOT-09", "Annie Leonhart", 1, "Attack on Titan", "Annie"),
-    "AOT-10": BaseChar("AOT-10", "Jean Kirstein", 1, "Attack on Titan", "Jean"),
-    "AOT-11": BaseChar("AOT-11", "Sasha Braus", 1, "Attack on Titan", "Sasha"),
-    "AOT-12": BaseChar("AOT-12", "Gabi Braun", 1, "Attack on Titan", "Gabi"),
-    "AOT-13": BaseChar("AOT-13", "Kenny Ackerman", 1, "Attack on Titan", "Kenny"),
-    "AOT-14": BaseChar("AOT-14", "Connie Springer", 1, "Attack on Titan", "Connie"),
-    "AOT-15": BaseChar("AOT-15", "Ymir", 1, "Attack on Titan"),
-    "AOT-16": BaseChar("AOT-16", "Bertolt Hoover", 1, "Attack on Titan", "Bertolt"),
-
-
+    "DBZ-19": BaseChar("DBZ-19", "Android 19", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-20": BaseChar("DBZ-20", "Android 20", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-21": BaseChar("DBZ-21", "Yamcha", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-22": BaseChar("DBZ-22", "Chiaotzu", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-23": BaseChar("DBZ-23", "Nail", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-24": BaseChar("DBZ-24", "Son Goten", "common", "Dragon Ball Z", short_name="Goten", boost_item="senzu_bean", alternate_forms=("DBZ-24-1",)),
+    "DBZ-25": BaseChar("DBZ-25", "Yajirobe", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-26": BaseChar("DBZ-26", "Zarbon", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-27": BaseChar("DBZ-27", "Jeice", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-28": BaseChar("DBZ-28", "Recoome", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-29": BaseChar("DBZ-29", "Burter", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-30": BaseChar("DBZ-30", "Guldo", "common", "Dragon Ball Z", boost_item="senzu_bean"),
+    "DBZ-31": BaseChar("DBZ-31", "Hercule", "common", "Dragon Ball Z", boost_item="senzu_bean"),
 
 
     # Jujutsu Kaisen
 
-    "JJK-01": BaseChar("JJK-01", "Satoru Gojo", 3, "Jujutsu Kaisen", "Gojo"),
-    "JJK-02": BaseChar("JJK-02", "Ryomen Sukuna", 3, "Jujutsu Kaisen", "Sukuna"),
+    "JJK-01": BaseChar("JJK-01", "Satoru Gojo", "mythical", "Jujutsu Kaisen"),
+    "JJK-02": BaseChar("JJK-02", "Ryomen Sukuna", "mythical", "Jujutsu Kaisen"),
 
-    "JJK-03": BaseChar("JJK-03", "Yuji Itadori", 2, "Jujutsu Kaisen", "Yuji"),
-    "JJK-04": BaseChar("JJK-04", "Yuta Okkotsu", 2, "Jujutsu Kaisen", "Yuta"),
-    "JJK-05": BaseChar("JJK-05", "Megumi Fushiguro", 2, "Jujutsu Kaisen", "Megumi"),
-    "JJK-06": BaseChar("JJK-06", "Toji Fushiguro", 2, "Jujutsu Kaisen", "Toji"),
-    "JJK-07": BaseChar("JJK-07", "Mahito", 2, "Jujutsu Kaisen"),
+    "JJK-03": BaseChar("JJK-03", "Yuji Itadori", "shining", "Jujutsu Kaisen"),
+    "JJK-04": BaseChar("JJK-04", "Yuta Okkotsu", "shining", "Jujutsu Kaisen"),
+    "JJK-05": BaseChar("JJK-05", "Toji Zenin", "shining", "Jujutsu Kaisen"),
+    "JJK-06": BaseChar("JJK-06", "Suguru Geto", "shining", "Jujutsu Kaisen"),
+    "JJK-07": BaseChar("JJK-07", "Megumi Fushiguro", "shining", "Jujutsu Kaisen"),
 
-    "JJK-08": BaseChar("JJK-08", "Nobara Kugisaki", 1, "Jujutsu Kaisen", "Nobara"),
-    "JJK-09": BaseChar("JJK-09", "Suguru Geto", 1, "Jujutsu Kaisen", "Geto"),
-    "JJK-10": BaseChar("JJK-10", "Choso", 1, "Jujutsu Kaisen"),
-    "JJK-11": BaseChar("JJK-11", "Kento Nanami", 1, "Jujutsu Kaisen", "Nanami"),
-    "JJK-12": BaseChar("JJK-12", "Toge Inumaki", 1, "Jujutsu Kaisen", "Inumaki"),
-    "JJK-13": BaseChar("JJK-13", "Maki Zenin", 1, "Jujutsu Kaisen", "Maki"),
-    "JJK-14": BaseChar("JJK-14", "Jogo", 1, "Jujutsu Kaisen"),
-    "JJK-15": BaseChar("JJK-15", "Aoi Todo", 1, "Jujutsu Kaisen", "Todo"),
+    "JJK-08": BaseChar("JJK-08", "Mahito", "glowing", "Jujutsu Kaisen"),
+    "JJK-09": BaseChar("JJK-09", "Choso", "glowing", "Jujutsu Kaisen"),
+    "JJK-10": BaseChar("JJK-10", "Aoi Todo", "glowing", "Jujutsu Kaisen"),
+    "JJK-11": BaseChar("JJK-11", "Jogo", "glowing", "Jujutsu Kaisen"),
+    "JJK-12": BaseChar("JJK-12", "Maki Zenin", "glowing", "Jujutsu Kaisen"),
+    "JJK-13": BaseChar("JJK-13", "Yuki Tsukumo", "glowing", "Jujutsu Kaisen"),
+    "JJK-14": BaseChar("JJK-14", "Hajime Kashimo", "glowing", "Jujutsu Kaisen"),
+    "JJK-15": BaseChar("JJK-15", "Kinji Hakari", "glowing", "Jujutsu Kaisen"),
+    "JJK-16": BaseChar("JJK-16", "Hiromi Higuruma", "glowing", "Jujutsu Kaisen"),
+
+    "JJK-17": BaseChar("JJK-17", "Nobara Kugisaki", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-18": BaseChar("JJK-18", "Toge Inumaki", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-19": BaseChar("JJK-19", "Panda", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-20": BaseChar("JJK-20", "Kasumi Miwa", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-21": BaseChar("JJK-21", "Kokichi Muta", "common", "Jujutsu Kaisen", short_name="Mechamaru", boost_item="cursed_tool"),
+    "JJK-22": BaseChar("JJK-22", "Momo Nishimiya", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-23": BaseChar("JJK-23", "Hanami", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-24": BaseChar("JJK-24", "Dagon", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-25": BaseChar("JJK-25", "Atsuya Kusakabe", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-26": BaseChar("JJK-26", "Uruame", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-27": BaseChar("JJK-27", "Kenjaku", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-28": BaseChar("JJK-28", "Mei Mei", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-29": BaseChar("JJK-29", "Kento Nanami", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-30": BaseChar("JJK-30", "Miguel Oduol", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
+    "JJK-31": BaseChar("JJK-31", "Mai Zenin", "common", "Jujutsu Kaisen", boost_item="cursed_tool"),
 
     
 
 
-    # One Punch Man
+    # # One Punch Man
 
-    "OPM-01": BaseChar("OPM-01", "Saitama", 3, "One Punch Man"),
-    "OPM-02": BaseChar("OPM-02", "Garou", 3, "One Punch Man"),
+    # "OPM-01": BaseChar("OPM-01", "Saitama", 3, "One Punch Man"),
+    # "OPM-02": BaseChar("OPM-02", "Garou", 3, "One Punch Man"),
     
-    "OPM-03": BaseChar("OPM-03", "Genos", 2, "One Punch Man"),
-    "OPM-04": BaseChar("OPM-04", "Speed-o'-Sound-Sonic", 2, "One Punch Man", "Sonic"),
-    "OPM-05": BaseChar("OPM-05", "Boros", 2, "One Punch Man"),
-    "OPM-06": BaseChar("OPM-06", "Bang", 2, "One Punch Man"),
-    "OPM-07": BaseChar("OPM-07", "Tatsumaki", 2, "One Punch Man"),
+    # "OPM-03": BaseChar("OPM-03", "Genos", 2, "One Punch Man"),
+    # "OPM-04": BaseChar("OPM-04", "Speed-o'-Sound-Sonic", 2, "One Punch Man", "Sonic"),
+    # "OPM-05": BaseChar("OPM-05", "Boros", 2, "One Punch Man"),
+    # "OPM-06": BaseChar("OPM-06", "Bang", 2, "One Punch Man"),
+    # "OPM-07": BaseChar("OPM-07", "Tatsumaki", 2, "One Punch Man"),
 
-    "OPM-08": BaseChar("OPM-08", "Fubuki", 1, "One Punch Man"),
-    "OPM-09": BaseChar("OPM-09", "King", 1, "One Punch Man"),
-    "OPM-10": BaseChar("OPM-10", "Metal Bat", 1, "One Punch Man"),
-    "OPM-11": BaseChar("OPM-11", "Zombieman", 1, "One Punch Man"),
-    "OPM-12": BaseChar("OPM-12", "Watchdog Man", 1, "One Punch Man"),
-    "OPM-13": BaseChar("OPM-13", "Metal Knight", 1, "One Punch Man"),
-    "OPM-14": BaseChar("OPM-14", "Atomic Samurai", 1, "One Punch Man"),
-
-
+    # "OPM-08": BaseChar("OPM-08", "Fubuki", 1, "One Punch Man"),
+    # "OPM-09": BaseChar("OPM-09", "King", 1, "One Punch Man"),
+    # "OPM-10": BaseChar("OPM-10", "Metal Bat", 1, "One Punch Man"),
+    # "OPM-11": BaseChar("OPM-11", "Zombieman", 1, "One Punch Man"),
+    # "OPM-12": BaseChar("OPM-12", "Watchdog Man", 1, "One Punch Man"),
+    # "OPM-13": BaseChar("OPM-13", "Metal Knight", 1, "One Punch Man"),
+    # "OPM-14": BaseChar("OPM-14", "Atomic Samurai", 1, "One Punch Man"),
 
 
-    # My Hero Academia
-    "MHA-01": BaseChar("MHA-01", "Izuku Midoriya", 3, "My Hero Academia", "Deku"),
-    "MHA-02": BaseChar("MHA-02", "Katsuki Bakugo", 3, "My Hero Academia", "Bakugo"),
-    "MHA-03": BaseChar("MHA-03", "Shoto Todoroki", 3, "My Hero Academia", "Todoroki"),
 
-    "MHA-04": BaseChar("MHA-04", "All Might", 2, "My Hero Academia"),
-    "MHA-05": BaseChar("MHA-05", "Tomura Shigaraki", 2, "My Hero Academia", "Shigaraki"),
-    "MHA-06": BaseChar("MHA-06", "Endeavour", 2, "My Hero Academia"),
-    "MHA-07": BaseChar("MHA-07", "Ochako Uraraka", 2, "My Hero Academia"),
-    "MHA-08": BaseChar("MHA-08", "Himiko Toga", 2, "My Hero Academia"),
 
-    "MHA-09": BaseChar("MHA-09", "Dabi", 1, "My Hero Academia"),
-    "MHA-10": BaseChar("MHA-10", "Hawks", 1, "My Hero Academia"),
-    "MHA-11": BaseChar("MHA-11", "Eijiro Kirishima", 1, "My Hero Academia"),
-    "MHA-12": BaseChar("MHA-12", "Shota Aizawa", 1, "My Hero Academia"),
-    "MHA-13": BaseChar("MHA-13", "Tenya Ida", 1, "My Hero Academia"),
-    "MHA-14": BaseChar("MHA-14", "Hitoshi Shinso", 1, "My Hero Academia"),
-    "MHA-15": BaseChar("MHA-15", "Neito Monoma", 1, "My Hero Academia"),
-    "MHA-16": BaseChar("MHA-16", "All for One", 1, "My Hero Academia"),
+    # # My Hero Academia
+    # "MHA-01": BaseChar("MHA-01", "Izuku Midoriya", 3, "My Hero Academia", "Deku"),
+    # "MHA-02": BaseChar("MHA-02", "Katsuki Bakugo", 3, "My Hero Academia", "Bakugo"),
+    # "MHA-03": BaseChar("MHA-03", "Shoto Todoroki", 3, "My Hero Academia", "Todoroki"),
+
+    # "MHA-04": BaseChar("MHA-04", "All Might", 2, "My Hero Academia"),
+    # "MHA-05": BaseChar("MHA-05", "Tomura Shigaraki", 2, "My Hero Academia", "Shigaraki"),
+    # "MHA-06": BaseChar("MHA-06", "Endeavour", 2, "My Hero Academia"),
+    # "MHA-07": BaseChar("MHA-07", "Ochako Uraraka", 2, "My Hero Academia"),
+    # "MHA-08": BaseChar("MHA-08", "Himiko Toga", 2, "My Hero Academia"),
+
+    # "MHA-09": BaseChar("MHA-09", "Dabi", 1, "My Hero Academia"),
+    # "MHA-10": BaseChar("MHA-10", "Hawks", 1, "My Hero Academia"),
+    # "MHA-11": BaseChar("MHA-11", "Eijiro Kirishima", 1, "My Hero Academia"),
+    # "MHA-12": BaseChar("MHA-12", "Shota Aizawa", 1, "My Hero Academia"),
+    # "MHA-13": BaseChar("MHA-13", "Tenya Ida", 1, "My Hero Academia"),
+    # "MHA-14": BaseChar("MHA-14", "Hitoshi Shinso", 1, "My Hero Academia"),
+    # "MHA-15": BaseChar("MHA-15", "Neito Monoma", 1, "My Hero Academia"),
+    # "MHA-16": BaseChar("MHA-16", "All for One", 1, "My Hero Academia"),
     
     
 
 
-    # Demon Slayer
-    "DS-01": BaseChar("DS-01", "Tanjiro Kamado", 3, "Demon Slayer", "Tanjiro"),
-    "DS-02": BaseChar("DS-02", "Nezuko Kamado", 3, "Demon Slayer", "Nezuko"),
+    # # Demon Slayer
+    # "DS-01": BaseChar("DS-01", "Tanjiro Kamado", 3, "Demon Slayer", "Tanjiro"),
+    # "DS-02": BaseChar("DS-02", "Nezuko Kamado", 3, "Demon Slayer", "Nezuko"),
 
-    "DS-03": BaseChar("DS-03", "Zenitsu Agatsuma", 2, "Demon Slayer"),
-    "DS-04": BaseChar("DS-04", "Muzan Kibutsuji", 2, "Demon Slayer"),
-    "DS-05": BaseChar("DS-05", "Giyu Tomioka", 2, "Demon Slayer"),
-    "DS-06": BaseChar("DS-06", "Shinobu Kocho", 2, "Demon Slayer"),
-    "DS-07": BaseChar("DS-07", "Muichiro Tokito", 2, "Demon Slayer"),
-    "DS-08": BaseChar("DS-08", "Inosuke Hashibira", 2, "Demon Slayer"),
+    # "DS-03": BaseChar("DS-03", "Zenitsu Agatsuma", 2, "Demon Slayer"),
+    # "DS-04": BaseChar("DS-04", "Muzan Kibutsuji", 2, "Demon Slayer"),
+    # "DS-05": BaseChar("DS-05", "Giyu Tomioka", 2, "Demon Slayer"),
+    # "DS-06": BaseChar("DS-06", "Shinobu Kocho", 2, "Demon Slayer"),
+    # "DS-07": BaseChar("DS-07", "Muichiro Tokito", 2, "Demon Slayer"),
+    # "DS-08": BaseChar("DS-08", "Inosuke Hashibira", 2, "Demon Slayer"),
 
-    "DS-09": BaseChar("DS-09", "Kanao Tsuyuri", 1, "Demon Slayer"),
-    "DS-10": BaseChar("DS-10", "Akaza", 1, "Demon Slayer"),
-    "DS-11": BaseChar("DS-11", "Tengen Uzui", 1, "Demon Slayer"),
-    "DS-12": BaseChar("DS-12", "Mitsuri Kanroji", 1, "Demon Slayer"),
-    "DS-13": BaseChar("DS-13", "Obanai Iguro", 1, "Demon Slayer"),
-    "DS-14": BaseChar("DS-14", "Gyomei Himejima", 1, "Demon Slayer"),
-    "DS-15": BaseChar("DS-15", "Sanemi Shinazugawa", 1, "Demon Slayer"),
-    "DS-16": BaseChar("DS-16", "Kyojuro Rengoku", 1, "Demon Slayer"),
-
-
+    # "DS-09": BaseChar("DS-09", "Kanao Tsuyuri", 1, "Demon Slayer"),
+    # "DS-10": BaseChar("DS-10", "Akaza", 1, "Demon Slayer"),
+    # "DS-11": BaseChar("DS-11", "Tengen Uzui", 1, "Demon Slayer"),
+    # "DS-12": BaseChar("DS-12", "Mitsuri Kanroji", 1, "Demon Slayer"),
+    # "DS-13": BaseChar("DS-13", "Obanai Iguro", 1, "Demon Slayer"),
+    # "DS-14": BaseChar("DS-14", "Gyomei Himejima", 1, "Demon Slayer"),
+    # "DS-15": BaseChar("DS-15", "Sanemi Shinazugawa", 1, "Demon Slayer"),
+    # "DS-16": BaseChar("DS-16", "Kyojuro Rengoku", 1, "Demon Slayer"),
 
 
-    # Hunter x Hunter
-    "HXH-01": BaseChar("HXH-01", "Gon Freecss", 3, "Hunter x Hunter", "Gon"),
-    "HXH-02": BaseChar("HXH-02", "Killua Zoldyck", 3, "Hunter x Hunter", "Killua"),
 
-    "HXH-03": BaseChar("HXH-03", "Kurapika", 2, "Hunter x Hunter"),
-    "HXH-04": BaseChar("HXH-04", "Hisoka Morow", 2, "Hunter x Hunter", "Hisoka"),
-    "HXH-05": BaseChar("HXH-05", "Biscuit Krueger", 2, "Hunter x Hunter", "Bisky"),
-    "HXH-06": BaseChar("HXH-06", "Kite", 2, "Hunter x Hunter"),
-    "HXH-07": BaseChar("HXH-07", "Meruem", 2, "Hunter x Hunter"),
-    "HXH-08": BaseChar("HXH-08", "Neferpitou", 2, "Hunter x Hunter", "Pitou"),
 
-    "HXH-09": BaseChar("HXH-09", "Leorio Paradinight", 1, "Hunter x Hunter", "Leorio"),
-    "HXH-10": BaseChar("HXH-10", "Chrollo Lucilfer", 1, "Hunter x Hunter", "Chrollo"),
-    "HXH-11": BaseChar("HXH-11", "Morel Mackernasey", 1, "Hunter x Hunter", "Morel"),
-    "HXH-12": BaseChar("HXH-12", "Ging Freecss", 1, "Hunter x Hunter", "Ging"),
-    "HXH-13": BaseChar("HXH-13", "Razor", 1, "Hunter x Hunter"),
-    "HXH-14": BaseChar("HXH-14", "Genthru", 1, "Hunter x Hunter"),
-    "HXH-15": BaseChar("HXH-15", "Knuckle Bine", 1, "Hunter x Hunter", "Knuckle"),
-    "HXH-16": BaseChar("HXH-16", "Isaac Netero", 1, "Hunter x Hunter", "Netero")
+    # # Hunter x Hunter
+    # "HXH-01": BaseChar("HXH-01", "Gon Freecss", 3, "Hunter x Hunter", "Gon"),
+    # "HXH-02": BaseChar("HXH-02", "Killua Zoldyck", 3, "Hunter x Hunter", "Killua"),
+
+    # "HXH-03": BaseChar("HXH-03", "Kurapika", 2, "Hunter x Hunter"),
+    # "HXH-04": BaseChar("HXH-04", "Hisoka Morow", 2, "Hunter x Hunter", "Hisoka"),
+    # "HXH-05": BaseChar("HXH-05", "Biscuit Krueger", 2, "Hunter x Hunter", "Bisky"),
+    # "HXH-06": BaseChar("HXH-06", "Kite", 2, "Hunter x Hunter"),
+    # "HXH-07": BaseChar("HXH-07", "Meruem", 2, "Hunter x Hunter"),
+    # "HXH-08": BaseChar("HXH-08", "Neferpitou", 2, "Hunter x Hunter", "Pitou"),
+
+    # "HXH-09": BaseChar("HXH-09", "Leorio Paradinight", 1, "Hunter x Hunter", "Leorio"),
+    # "HXH-10": BaseChar("HXH-10", "Chrollo Lucilfer", 1, "Hunter x Hunter", "Chrollo"),
+    # "HXH-11": BaseChar("HXH-11", "Morel Mackernasey", 1, "Hunter x Hunter", "Morel"),
+    # "HXH-12": BaseChar("HXH-12", "Ging Freecss", 1, "Hunter x Hunter", "Ging"),
+    # "HXH-13": BaseChar("HXH-13", "Razor", 1, "Hunter x Hunter"),
+    # "HXH-14": BaseChar("HXH-14", "Genthru", 1, "Hunter x Hunter"),
+    # "HXH-15": BaseChar("HXH-15", "Knuckle Bine", 1, "Hunter x Hunter", "Knuckle"),
+    # "HXH-16": BaseChar("HXH-16", "Isaac Netero", 1, "Hunter x Hunter", "Netero")
 
     }
+
+ALT_FORMS = {
+    "DBZ-01-1": AltForm("DBZ-01-1", "Super Saiyan Goku", short_name="Goku"),
+    "DBZ-01-2": AltForm("DBZ-01-2", "Super Saiyan 2 Goku", short_name="Goku"),
+    "DBZ-02-1": AltForm("DBZ-02-1", "Super Saiyan Vegeta", short_name="Vegeta"),
+    "DBZ-02-2": AltForm("DBZ-02-2", "Majin Vegeta", short_name="Vegeta"),
+    "DBZ-03-1": AltForm("DBZ-03-1", "Super Saiyan 2 Gohan", short_name="Gohan"),
+    "DBZ-03-2": AltForm("DBZ-03-2", "Ultimate Gohan", short_name="Gohan"),
+    "DBZ-04-1": AltForm("DBZ-04-1", "Final Form Frieza", short_name="Frieza"),
+    "DBZ-05-1": AltForm("DBZ-05-1", "Perfect Cell", short_name="Cell"),
+    "DBZ-06-1": AltForm("DBZ-06-1", "Super Buu", short_name="Majin Buu"),
+    "DBZ-06-2": AltForm("DBZ-06-2", "Kid Buu", short_name="Majin Buu"),
+    "DBZ-10-1": AltForm("DBZ-10-1", "Future Trunks", short_name="Trunks"),
+    "DBZ-24-1": AltForm("DBZ-24-1", "Super Saiyan Goten", short_name="Goten"),
+}
 
 
 def apply_growth(stats: dict, growth_style: str, growth_factor: int) -> dict:
@@ -314,7 +370,7 @@ def get_party_image(character: BaseChar, level: int, save_discord_file: bool = T
         base: PIL.Image.Image = PIL.Image.open(f'Assets/Party/{character.id}.jpg')
     except FileNotFoundError:
         base = PIL.Image.open(f"Assets/missing_asset.png")
-    frame = PIL.Image.open('Assets/{rarity}.png'.format(rarity=config.FRAME_KEY[character.rarity]))
+    frame = PIL.Image.open('Assets/{rarity}.png'.format(rarity=character.rarity.title()))
     stars = PIL.Image.open(f'Assets/Level {level if level in [1,2,3,4,5] else 1}.png')
 
     base.paste(frame, (0, 0), frame)

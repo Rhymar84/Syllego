@@ -13,6 +13,20 @@ StarShopColour = 0xfacf42
 CHARACTER_EMBED_COLOUR = 0xb71010
 INVENTORY_COLOUR = 0x03d3fc
 
+HYPERLINK_URL = "https://i.pinimg.com/474x/49/c0/f0/49c0f0470a24e4562faf23210277a23a.jpg"
+
+SPIN_OPTIONS = {
+    50: 0.25,
+    100: 0.35,
+    200: 0.25,
+    350: 0.1,
+    500: 0.05
+}
+SPIN_ITEM_OPTIONS = {
+    None: 0.7,
+    "basic_pack": 0.3
+}
+SPIN_COOLDOWN = 25200
 
 # Keys
 FRAME_KEY = {
@@ -24,6 +38,25 @@ RARITY_EMOJI_KEY = {
     3: '<:shining:1105901981299638343>',
     2: '<:glowing:1105937849976631417>',
     1: '<:common:1105901985024192642>'
+}
+RARITY_COLOUR_KEY = {
+    "common": 0xc9f2c9,
+    "glowing": 0xb32bb6,
+    "shining": 0xf7c01d,
+    "mythical": 0xf54290
+}
+RARITY_DUST_CONVERSION = {
+    "common": "green_dust",
+    "glowing": "purple_dust",
+    "shining": "shining_dust",
+    "mythical": "mythical_dust"
+}
+CURRENCY_KEY = {
+    "starpower": "Starpower",
+    "green_dust": "Green Dust",
+    "purple_dust": "Purple Dust",
+    "gold_dust": "Gold Dust",
+    "rainbow_dust": "Rainbow Dust"
 }
 CARD_RARITY_KEY = {
     'basic': '◽',
@@ -72,3 +105,8 @@ DECISION_TIME = 120
 SWITCH_COOLDOWN = 8
 def round_energy(round:int) -> int:
     return 3 if round < 5 else 4 if round < 10 else 5
+
+
+# Functions
+def blue(text: str) -> str:
+    return f"[{text}]({HYPERLINK_URL})"

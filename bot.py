@@ -5,9 +5,11 @@ import config
 import system.gacha as gacha
 import system.farming as farming
 import battles.battles as battles
+import system.emoji as emoji
 import datetime as dt
 import aiosqlite
 import math
+import datetime
 import heapq
 from time import perf_counter
 from discord.ext import tasks
@@ -18,7 +20,7 @@ from difflib import get_close_matches
 from config import TOKEN, BOT_ID, ErrorColour
 from config import SERVER
 from config import DEBUG
-from system.character_database import CHARACTERS, BaseChar, CharInfo
+from system.character_database import CHARACTERS, BaseChar, CharInfo, AltForm
 from system.items import ITEMS
 from system.recipes import RECIPES
 from battles.cards import Cards, BaseCard, create_card
@@ -122,9 +124,10 @@ class Book(discord.ui.View):
         
         if self.file_names:
             embed = self.pages[self.page]
+            extension = self.file_names[self.page][-3:]
 
-            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
-            embed.set_image(url=f'attachment://portrait.jpg')
+            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}', filename=f'portrait.{extension}')
+            embed.set_image(url=f'attachment://portrait.{extension}')
 
             await interaction.response.edit_message(embed=embed, attachments=[portrait], view=self)
         else:
@@ -146,8 +149,10 @@ class Book(discord.ui.View):
         if self.file_names:
             embed = self.pages[self.page]
 
-            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
-            embed.set_image(url=f'attachment://portrait.jpg')
+            extension = self.file_names[self.page][-3:]
+
+            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}', filename=f'portrait.{extension}')
+            embed.set_image(url=f'attachment://portrait.{extension}')
 
             await interaction.response.edit_message(embed=embed, attachments=[portrait], view=self)
         else:
@@ -159,8 +164,10 @@ class Book(discord.ui.View):
         if self.file_names:
             embed = self.pages[0]
 
-            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}.jpg', filename='portrait.jpg')
-            embed.set_image(url=f'attachment://portrait.jpg')
+            extension = self.file_names[self.page][-3:]
+
+            portrait = discord.File(f'Assets/Portraits/{self.file_names[self.page]}', filename=f'portrait.{extension}')
+            embed.set_image(url=f'attachment://portrait.{extension}')
 
             if len(self.pages) == 1:
                 await self.original_interaction.response.send_message(embed=embed, file=portrait)
@@ -189,9 +196,9 @@ class Book(discord.ui.View):
                 
         else:
             if len(self.pages) == 1:
-                await self.original_interaction.response.edit_message(embed=self.pages[0], view=None)
+                await self.original_interaction.response.edit_message(embed=self.pages[0], attachments=[], view=None)
             else:
-                await self.original_interaction.response.edit_message(embed=self.pages[0], view=self)
+                await self.original_interaction.response.edit_message(embed=self.pages[0], attachments=[], view=self)
 
 
 info_group = app_commands.Group(name="info", description="Check information on various battle mechanics.")
@@ -368,33 +375,6 @@ def run_discord_bot():
         collection = Book(interaction, embeds)
         await collection.create()
 
-
-
-
-    
-
-
-    ###### SPIN
-    @tree.command(
-            name = 'spin',
-            description = 'Roll a random character that can be claimed using starpower!',
-            guild = discord.Object(id=SERVER)
-    )
-    async def spin(interaction: discord.Interaction):
-
-        remaining_spins = await gacha.get_remaining_spins(interaction.user)
-
-        if remaining_spins < 1:
-            embed = discord.Embed(title='No Spins Left :(', description=f'You do not have any spins left! Spins refresh in {time_to_next_hour()}.', color=ErrorColour)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        await gacha.verify_collection(interaction.user)
-
-        pull: BaseChar = await gacha.do_spin(interaction.user)
-
-        spin = gacha.Spin(interaction, pull)
-        await spin.create()
         
 
         
@@ -489,10 +469,11 @@ def run_discord_bot():
         if level is None:
             level = 0
 
-        embed: discord.Embed = await character.display(level, 0xb71010)
+        extension = "gif" if character.rarity == "mythical" else "jpg"
 
-        portrait = discord.File(f'Assets/Portraits/{character.id}.jpg', filename='portrait.jpg')
-        embed.set_image(url=f'attachment://portrait.jpg')
+        embed: discord.Embed = await character.display(level, 0xb71010)
+        portrait = discord.File(f'Assets/Portraits/{character.id}.{extension}', filename=f'portrait.{extension}')
+        embed.set_image(url=f'attachment://portrait.{extension}')
 
         await interaction.response.send_message(embed=embed, file=portrait, view=CharInfo(interaction, character, level))
         
@@ -539,13 +520,46 @@ def run_discord_bot():
     async def status(interaction: discord.Interaction):
 
         starpower = await gacha.get_starpower(interaction.user)
-        spins_left = await gacha.get_remaining_spins(interaction.user)
 
-        embed = discord.Embed(title=f'{interaction.user.display_name}\'s Status', description=f'Spins Left: **{spins_left}**.\nSpins refresh in {time_to_next_hour()}.\nStarpower: **{starpower}%**.\nRecharge Rate: **20%/h**.\nClaim Cost: **50%**.', color=0xd2ac41)
+        seconds = await gacha.seocnds_since_last_spin(interaction.user)
+        if seconds < config.SPIN_COOLDOWN:
+            end_time = datetime.datetime.now() + datetime.timedelta(seconds=config.SPIN_COOLDOWN - seconds)
+            timestamp = f"<t:{int(end_time.timestamp())}:R>"
+        else:
+            timestamp = f"**Ready!**"
+
+
+        embed = discord.Embed(title=f'{interaction.user.display_name}\'s Status', description=f'Starpower: **{starpower}**\nSpin: {timestamp}', color=0xd2ac41)
         embed.set_thumbnail(url=interaction.user.display_avatar)
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar)
 
         await interaction.response.send_message(embed=embed)
+
+    ##### SPIN
+    @tree.command(
+            name = 'spin',
+            description = 'Spin the star wheel!',
+            guild = discord.Object(id=SERVER)
+    )
+    @app_commands.checks.cooldown(1, 5)
+    async def spin(interaction: discord.Interaction):
+
+        seconds = await gacha.seocnds_since_last_spin(interaction.user)
+        if seconds < config.SPIN_COOLDOWN:
+            end_time = datetime.datetime.now() + datetime.timedelta(seconds=config.SPIN_COOLDOWN - seconds)
+            timestamp = f"<t:{int(end_time.timestamp())}:R>"
+            await interaction.response.send_message(ephemeral=True, embed=discord.Embed(description=f"You must wait to spin again!\nYou can spin in {timestamp}.", color=ErrorColour))
+            return
+        
+        await interaction.response.defer()
+        await gacha.do_spin(interaction)
+
+
+    @spin.error
+    async def on_spin_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.CommandOnCooldown):
+            await interaction.response.send_message(ephemeral=True, embed = discord.Embed(description=f"You must wait to do that again.", color=ErrorColour))
+
 
 
     ##### STATUS
@@ -563,7 +577,7 @@ def run_discord_bot():
         
         await interaction.response.defer()
 
-        ids = tuple(CHARACTERS.keys())
+        ids = tuple([k for k, v in CHARACTERS.items() if not isinstance(v, AltForm)])
         missing = []
 
         db = sqlite3.connect('databases/gacha.sqlite')
@@ -599,55 +613,48 @@ def run_discord_bot():
         await interaction.followup.send(f'# Missing Characters Added:\n{added}')
 
 
-    ##### WISHINFO
-    @tree.command(
-            name = 'wishinfo',
-            description = 'View info about your wished series.',
-            guild = discord.Object(id=SERVER)
-    )
-    async def wishinfo(interaction: discord.Interaction):
-
-        wish = await gacha.get_wish(interaction.user)
-
-        if wish is None:
-            info_text = 'You are not currently wishing for a series.'
-        else:
-            info_text = f'You have a +10% chance to pull characters from **{wish}**.'
-        
-        embed = discord.Embed(description=f'{info_text}', color=0x144066)
-        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar)
-        embed.set_footer(text='Use /wish to wish for a series. Use "/wish None" to remove your wish.')
-
-        await interaction.response.send_message(embed=embed)
-
     ##### WISH
     @tree.command(
             name = 'wish',
-            description = 'Wish for a series.',
+            description = 'Spend starpower to wish for a character.',
             guild = discord.Object(id=SERVER)
     )
-    @app_commands.autocomplete(series=autocomplete_series)
-    async def wish(interaction: discord.Interaction, series: str):
+    async def wish(interaction: discord.Interaction):
 
-        if series not in SERIES_LIST and series.lower() != 'none':
-            error = discord.Embed(title='Series Not Found :(', description=f'Could not find series called **{series}**!', color=ErrorColour)
-            await interaction.response.send_message(embed=error, ephemeral=True)
+        starpower = await gacha.get_starpower(interaction.user)
+
+        if starpower < 100:
+            embed = discord.Embed(title='Insufficient Starpower', description=f'You need 100 starpower to make a wish, and you only have **{starpower}**.', color=ErrorColour)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        if interaction.user in gacha.active_wishes:
+            embed = discord.Embed(description=f'You are already making a wish.', color=ErrorColour)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
-        if series.lower() == 'none':
-            series = None
+        #await gacha.verify_collection(interaction.user)
 
-        await gacha.set_wish(interaction.user, series)
+        await interaction.response.defer()
+        await gacha.do_wish(interaction)
 
-        if series is None:
-            description = 'Successfully cleared your wished series.'
-        else:
-            description = f'Successfully set your wished series to **{series}**!'
+    ##### SHOP
+    @tree.command(
+            name = 'shop',
+            description = 'Open the shop menu.',
+            guild = discord.Object(id=SERVER)
+    )
+    async def shop(interaction: discord.Interaction):
+        import system.shop as shop
 
-        embed = discord.Embed(title='Wish Set', description=description, color=0x29d16c)
-        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar)
+        await interaction.response.defer()
 
-        await interaction.response.send_message(embed=embed)
+        embed = discord.Embed(description="Welcome to the market! Select a shop to begin.", color=0xbd4e04)
+
+        view = discord.ui.View()
+        view.add_item(shop.ShopSelect(interaction.user))
+
+        await interaction.followup.send(embed=embed, view=view)
+
 
     
     ##### SIM
@@ -675,11 +682,11 @@ def run_discord_bot():
             pull = await gacha.do_spin(interaction.user)
             rarity = pull.rarity
 
-            if rarity == 3:
+            if rarity == "shining":
                 sh += 1
-            elif rarity == 2:
+            elif rarity == "glowing":
                 gl += 1
-            elif rarity == 1:
+            elif rarity == "common":
                 c += 1
         
         embed = discord.Embed(title='Spins Simulated', description=f'**{sh}** {gacha.shining_emoji}\n**{gl}** {gacha.glowing_emoji}\n**{c}** {gacha.common_emoji}', color=ErrorColour)
@@ -911,6 +918,7 @@ def run_discord_bot():
         await interaction.followup.send(embed=embed)
 
 
+
     @tree.command(
             name = 'test',
             description = 'Test command',
@@ -995,8 +1003,8 @@ def run_discord_bot():
         global campaigner
         campaigner = guild0.get_member(BOT_ID)
 
-        if not daily.is_running():
-            daily.start()
+        # if not daily.is_running():
+        #     daily.start()
         if not notifications.is_running():
             notifications.start()
 
@@ -1010,6 +1018,10 @@ def run_discord_bot():
         except discord.app_commands.errors.CommandAlreadyRegistered:
             pass
         await tree.sync(guild=discord.Object(id=SERVER))
+
+        # Load Emojis
+        emojis = await client.fetch_application_emojis()
+        emoji.load_emojis(emojis)
 
         print(f"{client.user} is now running!")
 

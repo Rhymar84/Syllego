@@ -8,6 +8,7 @@ import aiosqlite
 import system.items as items
 import system.recipes as recipes
 import heapq
+from system.emoji import EMOJIS
 
 FARMING_MODES = {1: 'grow', 2: 'harvest', 3: 'extract'}
 FARMING_MODE_MAP = {"grow": "🚜", "harvest": "🐄", "extract": "⛏️"}
@@ -116,6 +117,7 @@ async def get_aiofu_embed(member: discord.Member) -> tuple[discord.Embed, discor
 
     embed = discord.Embed(
         title="AIO Farming Unit",
+        url=config.HYPERLINK_URL,
         description=content,
         color=0x32a852
     )
@@ -408,6 +410,7 @@ async def get_refinery_embed(member: discord.Member) -> tuple[discord.Embed, dis
 
     embed = discord.Embed(
         title="Refinery",
+        url=config.HYPERLINK_URL,
         description=content,
         color=0xbd193f
     )
@@ -618,7 +621,7 @@ class ViewRecipesButton(discord.ui.Button):
             ingredients = recipe["ingredients"]
             loot_table = recipe["loot_tables"]["ideal"][0]["loot"]
 
-            ingredients_strings = "\n".join([f"- {item_display_string(k)} x**{v}**" for k,v in ingredients.items()])
+            ingredients_strings = "\n".join([f"- {item_display_string(k)} x**{v}** `{await recipe_has_enough(interaction.user, k, v)}`" for k,v in ingredients.items()])
             loot_strings = "\n".join([f"- {item_display_string(k)} x**{v}**" for k,v in loot_table.items()])
             ideal_modes = ", ".join([f"{REFINERY_MODE_NAMES[x][:-2]}" for x in recipe["ideal_modes"]])
             normal_modes = ", ".join([f"{REFINERY_MODE_NAMES[x][:-2]}" for x in recipe["normal_modes"]])
@@ -630,6 +633,10 @@ class ViewRecipesButton(discord.ui.Button):
         book = Book(interaction, embeds)
         await book.edit_create()
 
+async def recipe_has_enough(member: discord.Member, item_id: str, quantity: int = 1) -> str:
+    owned_count = await gacha.get_item_count(member, item_id)
+    return "✅" if owned_count >= quantity else "❌"
+
 def item_display_string(item_id: str) -> str:
-    emoji = items.ITEMS[item_id].get('emoji', '')
+    emoji = EMOJIS.get(item_id, '')
     return f"{emoji + ' ' if emoji else ''}{items.ITEMS[item_id]['name']}"
